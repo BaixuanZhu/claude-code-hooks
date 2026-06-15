@@ -79,7 +79,12 @@ def show_notification(message: str):
     root.withdraw()  # hide root window
     root.attributes("-topmost", True)
 
-    # Schedule auto-close
+    # Auto-close: this is the ONLY place we destroy root. We intentionally do
+    # NOT call root.destroy() after showinfo() returns: in Python 3.14
+    # root.destroy() tears down the whole Tcl interpreter, so any later Tk call
+    # (even winfo_exists) raises "can't invoke ... : application has been
+    # destroyed". When the user clicks OK, showinfo returns and main() does
+    # sys.exit(0), which cleans up the process — no explicit destroy needed.
     root.after(AUTO_CLOSE_MS, root.destroy)
 
     messagebox.showinfo(
@@ -87,7 +92,6 @@ def show_notification(message: str):
         message,
         parent=root,
     )
-    root.destroy()
 
 
 def main():
