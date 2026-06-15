@@ -32,7 +32,8 @@ The AI reads `SKILL.md` and installs everything automatically — no manual step
 ### Manual
 
 1. Clone the repo
-2. Add to `~/.claude/settings.json`:
+2. Copy `hooks/*.pyw` into `~/.claude/hooks/scripts/` (create the folder if needed)
+3. Add to `~/.claude/settings.json`:
 
 ```json
 {
@@ -40,31 +41,31 @@ The AI reads `SKILL.md` and installs everything automatically — no manual step
     "PermissionRequest": [
       {
         "matcher": "Bash|Edit|Write|Read|Glob|Grep|WebFetch|WebSearch|mcp__.*",
-        "hooks": [{ "type": "command", "command": "pythonw ${CLAUDE_PROJECT_DIR}/hooks/permission_request.pyw" }]
+        "hooks": [{ "type": "command", "command": "pythonw C:\\Users\\YOU\\.claude\\hooks\\scripts\\permission_request.pyw" }]
       },
       {
         "matcher": "ExitPlanMode",
-        "hooks": [{ "type": "command", "command": "pythonw ${CLAUDE_PROJECT_DIR}/hooks/exit_plan_mode_notify.pyw" }]
+        "hooks": [{ "type": "command", "command": "pythonw C:\\Users\\YOU\\.claude\\hooks\\scripts\\exit_plan_mode_notify.pyw" }]
       }
     ],
     "PreToolUse": [
       {
         "matcher": "AskUserQuestion",
-        "hooks": [{ "type": "command", "command": "pythonw ${CLAUDE_PROJECT_DIR}/hooks/ask_user_question.pyw" }]
+        "hooks": [{ "type": "command", "command": "pythonw C:\\Users\\YOU\\.claude\\hooks\\scripts\\ask_user_question.pyw" }]
       }
     ],
     "Stop": [
       {
-        "hooks": [{ "type": "command", "command": "pythonw ${CLAUDE_PROJECT_DIR}/hooks/stop_notify.pyw" }]
+        "hooks": [{ "type": "command", "command": "pythonw C:\\Users\\YOU\\.claude\\hooks\\scripts\\stop_notify.pyw" }]
       }
     ]
   }
 }
 ```
 
-3. Restart Claude Code
+4. Restart Claude Code
 
-> Use `pythonw` (not `python`) — prevents console window flash.
+> Replace `C:\Users\YOU` with your actual user path. Use `pythonw` (not `python`) — prevents console window flash.
 
 ## Limitations
 

@@ -7,16 +7,24 @@ Reads JSON from stdin (UTF-8), shows Allow/Deny dialog,
 outputs JSON decision to stdout.
 """
 
+import ctypes
 import json
 import sys
 import tkinter as tk
 from tkinter import scrolledtext
 
-# Fix encoding on Windows
-if hasattr(sys.stdin, "reconfigure"):
-    sys.stdin.reconfigure(encoding="utf-8")
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8")
+# Ensure UTF-8 output for CJK content in the JSON decision. stdin is read via
+# sys.stdin.buffer.read() and decoded manually, so only stdout needs reconfiguring.
+sys.stdout.reconfigure(encoding="utf-8")
+
+# High-DPI awareness so dialogs aren't blurry on scaled displays.
+try:
+    ctypes.windll.shcore.SetProcessDpiAwareness(1)  # per-monitor V2 (Win 8.1+)
+except (AttributeError, OSError):
+    try:
+        ctypes.windll.user32.SetProcessDPIAware()  # legacy fallback (Vista+)
+    except (AttributeError, OSError):
+        pass
 
 MAX_WIDTH = 600
 MAX_HEIGHT = 520
@@ -36,9 +44,13 @@ SUGGESTION_LABELS = {
 
 
 def get_suggestion_label(suggestion: dict) -> str:
+    # Official PermissionRequest input schema puts behavior/destination at the
+    # TOP LEVEL of each permission_suggestions entry:
+    #   {"type": "addRules", "rules": [...], "behavior": "allow", "destination": "session"}
+    # Older/internal payloads may nest them under "decision"; tolerate both.
+    behavior = suggestion.get("behavior") or suggestion.get("decision", {}).get("behavior", "")
+    dest = suggestion.get("destination") or suggestion.get("decision", {}).get("destination", "")
     sug_type = suggestion.get("type", "")
-    behavior = suggestion.get("decision", {}).get("behavior", "")
-    dest = suggestion.get("decision", {}).get("destination", "")
     return SUGGESTION_LABELS.get((sug_type, behavior, dest), "Apply Rule")
 
 
@@ -80,6 +92,17 @@ def build_permission_message(data: dict) -> tuple[str, str]:
             body = body[:200] + "\n... (truncated)"
 
     return title, body
+
+
+def _deny(message: str):
+    """Emit a PermissionRequest deny decision with the given reason and exit."""
+    print(json.dumps({
+        "hookSpecificOutput": {
+            "hookEventName": "PermissionRequest",
+            "decision": {"behavior": "deny", "message": message},
+        }
+    }, ensure_ascii=False))
+    sys.exit(0)
 
 
 def _center_dialog(dialog: tk.Toplevel, width: int = None, height: int = None):
@@ -168,7 +191,13 @@ def show_permission_dialog(title: str, body: str, suggestions: list[dict]) -> tu
         max_cols = 2
         for i, sug in enumerate(suggestions):
             label = get_suggestion_label(sug)
-            sug_behavior = sug.get("decision", {}).get("behavior", "allow")
+            # Read behavior from the top level (see get_suggestion_label) so a
+            # "Deny for Session" suggestion actually denies instead of silently allow.
+            sug_behavior = (
+                sug.get("behavior")
+                or sug.get("decision", {}).get("behavior", "")
+                or "allow"
+            )
             idx = i + 1
 
             def on_suggestion(s=sug, b=sug_behavior):
@@ -195,13 +224,10 @@ def main():
         raw = sys.stdin.buffer.read()
         data = json.loads(raw.decode("utf-8"))
     except Exception:
-        print(json.dumps({
-            "hookSpecificOutput": {
-                "hookEventName": "PermissionRequest",
-                "decision": {"behavior": "deny", "message": "Failed to parse hook input"},
-            }
-        }))
-        sys.exit(0)
+        _deny("Failed to parse hook input")
+
+    if not isinstance(data, dict):
+        _deny("Invalid hook input")
 
     title, body = build_permission_message(data)
     suggestions = data.get("permission_suggestions", [])
@@ -217,17 +243,6 @@ def main():
                 }
             }
         }
-    elif behavior == "deny" and selected_suggestion:
-        output = {
-            "hookSpecificOutput": {
-                "hookEventName": "PermissionRequest",
-                "decision": {
-                    "behavior": "deny",
-                    "message": "Denied by user via GUI dialog",
-                    "updatedPermissions": [selected_suggestion],
-                }
-            }
-        }
     elif behavior == "allow":
         output = {
             "hookSpecificOutput": {
@@ -236,6 +251,8 @@ def main():
             }
         }
     else:
+        # updatedPermissions is allow-only per the hooks spec; a Deny never
+        # applies a suggestion's rule, even if the user picked one.
         output = {
             "hookSpecificOutput": {
                 "hookEventName": "PermissionRequest",
