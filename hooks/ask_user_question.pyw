@@ -252,16 +252,19 @@ def show_question_dialog(questions: list[dict]) -> dict | None:
             )
             cb.pack(anchor="w", padx=4)
 
-            # Clicking anywhere on the option row toggles the checkbox,
-            # so define the handler up front and reuse it for the frame,
-            # the checkbutton label, and the description label below.
-            def _make_frame_toggle(v):
+            # Clicking the frame background (outside the Checkbutton widget itself)
+            # should also toggle the variable.  We bind to opt_frame but ONLY act
+            # when the click lands directly on opt_frame (not on a child widget like
+            # the Checkbutton), to avoid double-toggling via event bubbling.
+            # The Checkbutton's own built-in <Button-1> handler already toggles the
+            # variable — we must NOT add another binding on cb itself.
+            def _make_frame_toggle(v, frame):
                 def onClick(event):
-                    v.set(not v.get())
+                    if event.widget is frame:
+                        v.set(not v.get())
                 return onClick
-            _toggle = _make_frame_toggle(var)
+            _toggle = _make_frame_toggle(var, opt_frame)
             opt_frame.bind("<Button-1>", _toggle)
-            cb.bind("<Button-1>", lambda e, fn=_toggle: fn(e))
 
             # Description label
             desc = opt.get("description", "")
@@ -269,7 +272,8 @@ def show_question_dialog(questions: list[dict]) -> dict | None:
                 desc_lbl = tk.Label(opt_frame, text=desc, wraplength=500,
                                     justify="left", anchor="w")
                 desc_lbl.pack(anchor="w", padx=28, pady=(0, 2))
-                desc_lbl.bind("<Button-1>", _toggle)
+                # desc_lbl is a leaf widget (no children), so a plain toggle is safe.
+                desc_lbl.bind("<Button-1>", lambda e, v=var: v.set(not v.get()))
 
             # Free-text entry (hidden until the option is selected)
             if is_free:

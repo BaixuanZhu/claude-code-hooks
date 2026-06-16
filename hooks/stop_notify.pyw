@@ -79,8 +79,10 @@ def main():
     message = _build_message(data)
     show_notification(message)
 
-    # No output to stdout — Stop hooks don't need to emit anything.
-    sys.exit(0)
+    # Hookify plugin requires valid JSON on stdout even when the
+    # native Stop hook spec allows empty output. Emit a minimal
+    # "continue": true so the plugin doesn't choke.
+    print(json.dumps({"continue": True}))
 
 
 if __name__ == "__main__":
