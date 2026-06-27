@@ -15,6 +15,7 @@ plan is about (falling back to a generic prompt when no plan is available).
 
 import ctypes
 import json
+import os
 import re
 import sys
 import tkinter as tk
@@ -95,6 +96,10 @@ def show_notification(message: str):
 
 
 def main():
+    # Test mode: skip dialog, exit cleanly.
+    if os.environ.get("CLAUDE_HOOK_TEST") == "1":
+        sys.exit(0)
+
     data = _read_stdin_json()
     message = _build_message(data)
     show_notification(message)

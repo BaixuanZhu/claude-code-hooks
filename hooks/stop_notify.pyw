@@ -14,6 +14,7 @@ last assistant message for the dialog body. Falls back to a generic
 
 import ctypes
 import json
+import os
 import re
 import sys
 import tkinter as tk
@@ -75,6 +76,11 @@ def show_notification(message: str):
 
 
 def main():
+    # Test mode: skip dialog, emit continue=true and exit.
+    if os.environ.get("CLAUDE_HOOK_TEST") == "1":
+        print(json.dumps({"continue": True}))
+        sys.exit(0)
+
     data = _read_stdin_json()
     message = _build_message(data)
     show_notification(message)

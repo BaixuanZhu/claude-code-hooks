@@ -9,6 +9,7 @@ outputs JSON decision to stdout.
 
 import ctypes
 import json
+import os
 import sys
 import tkinter as tk
 from tkinter import scrolledtext
@@ -220,6 +221,16 @@ def show_permission_dialog(title: str, body: str, suggestions: list[dict]) -> tu
 
 
 def main():
+    # Test mode: skip dialog, return default allow decision.
+    if os.environ.get("CLAUDE_HOOK_TEST") == "1":
+        print(json.dumps({
+            "hookSpecificOutput": {
+                "hookEventName": "PermissionRequest",
+                "decision": {"behavior": "allow"},
+            }
+        }, ensure_ascii=False))
+        sys.exit(0)
+
     try:
         raw = sys.stdin.buffer.read()
         data = json.loads(raw.decode("utf-8"))

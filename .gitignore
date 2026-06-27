@@ -33,3 +33,8 @@ desktop.ini
 # WorkBuddy / Claude
 .workbuddy/
 .claude/
+
+# Personal scaffolding (must not be published)
+reference/
+codegraph/
+.codegraph/

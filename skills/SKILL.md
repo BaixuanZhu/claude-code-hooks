@@ -12,16 +12,16 @@ Fetch each file and save to `~/.claude/hooks/scripts/`:
 
 | File | URL |
 |------|-----|
-| `permission_request.pyw` | `https://raw.githubusercontent.com/a2359117018/claude-code-dialogs/main/hooks/permission_request.pyw` |
-| `ask_user_question.pyw` | `https://raw.githubusercontent.com/a2359117018/claude-code-dialogs/main/hooks/ask_user_question.pyw` |
-| `stop_notify.pyw` | `https://raw.githubusercontent.com/a2359117018/claude-code-dialogs/main/hooks/stop_notify.pyw` |
-| `exit_plan_mode_notify.pyw` | `https://raw.githubusercontent.com/a2359117018/claude-code-dialogs/main/hooks/exit_plan_mode_notify.pyw` |
+| `permission_request.pyw` | `https://raw.githubusercontent.com/BaixuanZhu/claude-code-hooks/main/hooks/permission_request.pyw` |
+| `ask_user_question.pyw` | `https://raw.githubusercontent.com/BaixuanZhu/claude-code-hooks/main/hooks/ask_user_question.pyw` |
+| `stop_notify.pyw` | `https://raw.githubusercontent.com/BaixuanZhu/claude-code-hooks/main/hooks/stop_notify.pyw` |
+| `exit_plan_mode_notify.pyw` | `https://raw.githubusercontent.com/BaixuanZhu/claude-code-hooks/main/hooks/exit_plan_mode_notify.pyw` |
 
 ### Fallback: git clone
 
 If `raw.githubusercontent.com` is unreachable:
 
-1. `git clone https://github.com/a2359117018/claude-code-dialogs.git` into a temp directory
+1. `git clone https://github.com/BaixuanZhu/claude-code-hooks.git` into a temp directory
 2. Copy `hooks/*.pyw` (4 files) to `~/.claude/hooks/scripts/`
 3. Delete the temp directory
 

@@ -23,6 +23,7 @@ Output format (per docs):
 
 import ctypes
 import json
+import os
 import re
 import sys
 import tkinter as tk
@@ -355,6 +356,28 @@ def show_question_dialog(questions: list[dict]) -> dict | None:
 
 
 def main():
+    # Test mode: skip dialog, return first option as default answer.
+    if os.environ.get("CLAUDE_HOOK_TEST") == "1":
+        try:
+            raw = sys.stdin.buffer.read()
+            data = json.loads(raw.decode("utf-8")) if raw else {}
+        except Exception:
+            data = {}
+        tool_input = data.get("tool_input", {}) if isinstance(data, dict) else {}
+        questions = tool_input.get("questions", [])
+        answers = {q.get("question", ""): (q.get("options", [{}])[0].get("label", "") if q.get("options") else "") for q in questions}
+        print(json.dumps({
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "allow",
+                "updatedInput": {
+                    "questions": questions,
+                    "answers": answers,
+                }
+            }
+        }, ensure_ascii=False))
+        sys.exit(0)
+
     try:
         raw = sys.stdin.buffer.read()
         data = json.loads(raw.decode("utf-8"))
