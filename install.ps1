@@ -1,8 +1,10 @@
-# install.ps1 - Claude Code Hooks installer for Windows
+# install.ps1 - Claude Code Hooks installer (cross-platform)
 # Usage:
 #   iwr https://raw.githubusercontent.com/BaixuanZhu/claude-code-hooks/main/install.ps1 -UseBasicParsing | iex
 #
-# Idempotent: safe to re-run. Overwrites .pyw files and merges into settings.json.
+# Idempotent: safe to re-run. Overwrites .py files and merges into settings.json.
+# Note: For Claude Code v2.1+, plugin install is recommended over this script:
+#   claude plugin marketplace add BaixuanZhu/claude-code-hooks
 
 $ErrorActionPreference = "Stop"
 
@@ -13,10 +15,10 @@ $BaseUrl   = "https://raw.githubusercontent.com/$RepoOwner/$RepoName/main"
 $HooksDir  = Join-Path $env:USERPROFILE ".claude\hooks\scripts"
 $SettingsPath = Join-Path $env:USERPROFILE ".claude\settings.json"
 $Scripts   = @(
-    "permission_request.pyw",
-    "ask_user_question.pyw",
-    "stop_notify.pyw",
-    "exit_plan_mode_notify.pyw"
+    "permission_request.py",
+    "ask_user_question.py",
+    "stop_notify.py",
+    "exit_plan_mode_notify.py"
 )
 
 function Write-Step($msg)  { Write-Host "`n== $msg ==" -ForegroundColor Cyan }
@@ -87,21 +89,27 @@ function Ensure-EventList($obj, $eventName) {
 }
 
 # Build the target config
+# Cross-platform: pythonw (Windows, no console) || python3 (macOS/Linux)
+$cmdPerm = "pythonw ~/.claude/hooks/scripts/permission_request.py || python3 ~/.claude/hooks/scripts/permission_request.py"
+$cmdExit = "pythonw ~/.claude/hooks/scripts/exit_plan_mode_notify.py || python3 ~/.claude/hooks/scripts/exit_plan_mode_notify.py"
+$cmdAsk  = "pythonw ~/.claude/hooks/scripts/ask_user_question.py || python3 ~/.claude/hooks/scripts/ask_user_question.py"
+$cmdStop = "pythonw ~/.claude/hooks/scripts/stop_notify.py || python3 ~/.claude/hooks/scripts/stop_notify.py"
+
 $permissionMain = [PSCustomObject]@{
     matcher = "Bash|Edit|Write|Read|Glob|Grep|WebFetch|WebSearch|mcp__.*"
-    hooks   = @(@{ type = "command"; command = "pythonw ~/.claude/hooks/scripts/permission_request.pyw" })
+    hooks   = @(@{ type = "command"; command = $cmdPerm })
 }
 $permissionExit = [PSCustomObject]@{
     matcher = "ExitPlanMode"
-    hooks   = @(@{ type = "command"; command = "pythonw ~/.claude/hooks/scripts/exit_plan_mode_notify.pyw" })
+    hooks   = @(@{ type = "command"; command = $cmdExit })
 }
 $preAsk = [PSCustomObject]@{
     matcher = "AskUserQuestion"
-    hooks   = @(@{ type = "command"; command = "pythonw ~/.claude/hooks/scripts/ask_user_question.pyw" })
+    hooks   = @(@{ type = "command"; command = $cmdAsk })
 }
 $stopHook = [PSCustomObject]@{
     matcher = $null
-    hooks   = @(@{ type = "command"; command = "pythonw ~/.claude/hooks/scripts/stop_notify.pyw" })
+    hooks   = @(@{ type = "command"; command = $cmdStop })
 }
 
 # PermissionRequest: replace or add both matchers
@@ -131,7 +139,7 @@ $hasStopHook = $false
 foreach ($entry in $stList) {
     if ($entry.hooks) {
         foreach ($h in $entry.hooks) {
-            if ($h.command -like "*stop_notify.pyw*") { $hasStopHook = $true; break }
+            if ($h.command -like "*stop_notify.py*") { $hasStopHook = $true; break }
         }
     }
 }

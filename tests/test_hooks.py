@@ -55,7 +55,7 @@ def test_permission_request_smoke():
         "tool_input": {"command": "echo hello"},
         "permission_suggestions": [],
     }
-    result = _run_hook("permission_request.pyw", event)
+    result = _run_hook("permission_request.py", event)
     assert result.returncode == 0, f"stderr: {result.stderr.decode('utf-8', 'replace')}"
     payload = json.loads(result.stdout.decode("utf-8"))
     assert payload["hookSpecificOutput"]["hookEventName"] == "PermissionRequest"
@@ -78,7 +78,7 @@ def test_ask_user_question_smoke():
             ]
         },
     }
-    result = _run_hook("ask_user_question.pyw", event)
+    result = _run_hook("ask_user_question.py", event)
     assert result.returncode == 0, f"stderr: {result.stderr.decode('utf-8', 'replace')}"
     payload = json.loads(result.stdout.decode("utf-8"))
     hso = payload["hookSpecificOutput"]
@@ -93,7 +93,7 @@ def test_ask_user_question_smoke():
 
 def test_stop_notify_smoke():
     event = {"last_assistant_message": "Task completed successfully."}
-    result = _run_hook("stop_notify.pyw", event)
+    result = _run_hook("stop_notify.py", event)
     assert result.returncode == 0, f"stderr: {result.stderr.decode('utf-8', 'replace')}"
     payload = json.loads(result.stdout.decode("utf-8"))
     # Stop hook must at least emit a continue:true so plugins don't choke
@@ -105,14 +105,14 @@ def test_exit_plan_mode_notify_smoke():
         "tool_name": "ExitPlanMode",
         "tool_input": {"plan": "# My plan\nImplement feature X across two files."},
     }
-    result = _run_hook("exit_plan_mode_notify.pyw", event)
+    result = _run_hook("exit_plan_mode_notify.py", event)
     # ExitPlanMode in test mode exits silently (rc=0, no output)
     assert result.returncode == 0, f"stderr: {result.stderr.decode('utf-8', 'replace')}"
 
 
 def test_permission_request_handles_garbage_input():
     """Hook must not crash on unparseable JSON — should deny with a message."""
-    script_path = HOOKS_DIR / "permission_request.pyw"
+    script_path = HOOKS_DIR / "permission_request.py"
     env = os.environ.copy()
     env["CLAUDE_HOOK_TEST"] = "1"
     result = subprocess.run(

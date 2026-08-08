@@ -38,3 +38,7 @@ desktop.ini
 reference/
 codegraph/
 .codegraph/
+
+# Daily Summary skill artifacts (not part of this repo)
+daily-summary.zip
+docs/daily-summary/

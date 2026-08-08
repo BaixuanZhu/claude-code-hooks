@@ -128,6 +128,8 @@ def show_permission_dialog(title: str, body: str, suggestions: list[dict]) -> tu
     dialog.attributes("-topmost", True)
 
     # Title
+    # "Microsoft YaHei UI" renders CJK text sharply on Windows; tkinter
+    # auto-falls back to the system default font on macOS/Linux.
     tk.Label(dialog, text=title, font=("Microsoft YaHei UI", 12, "bold"),
              anchor="w").pack(fill="x", padx=20, pady=(15, 8))
 

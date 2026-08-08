@@ -85,9 +85,9 @@ def main():
     message = _build_message(data)
     show_notification(message)
 
-    # Hookify plugin requires valid JSON on stdout even when the
+    # Some plugin systems require valid JSON on stdout even when the
     # native Stop hook spec allows empty output. Emit a minimal
-    # "continue": true so the plugin doesn't choke.
+    # "continue": true so plugins don't choke.
     print(json.dumps({"continue": True}))
 
 

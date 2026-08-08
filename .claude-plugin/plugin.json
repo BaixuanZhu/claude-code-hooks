@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "claude-code-hooks",
+  "displayName": "Claude Code GUI Hooks",
+  "version": "0.2.0",
+  "description": "Native GUI dialogs for Claude Code permission requests, question prompts, and task notifications. Cross-platform (Windows/macOS/Linux) with zero dependencies beyond Python + tkinter.",
+  "author": {
+    "name": "BaixuanZhu",
+    "url": "https://github.com/BaixuanZhu"
+  },
+  "homepage": "https://github.com/BaixuanZhu/claude-code-hooks",
+  "repository": "https://github.com/BaixuanZhu/claude-code-hooks",
+  "license": "MIT",
+  "keywords": ["hooks", "gui", "permission", "notification", "dialog", "tkinter", "cross-platform"]
+}
