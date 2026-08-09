@@ -15,14 +15,15 @@ Replace Claude Code's terminal permission prompts with native GUI dialogs — ze
 
 | Hook | Event | What it does |
 |------|-------|--------------|
-| **Permission Request** | `PermissionRequest` | Allow/Deny dialog with suggestion buttons (session/project/global scope) |
-| **Ask User Question** | `PreToolUse` → `AskUserQuestion` | Native option dialog — single select or multi select, with free-text "Other" input |
+| **Permission Request** | `PermissionRequest` | Allow/Deny dialog with suggestion buttons (session/project/global scope, Chinese labels) |
+| **Ask User Question** | `PreToolUse` → `AskUserQuestion` | Native option dialog — single select or multi select, with multi-line free-text "Other" input |
 | **Stop Notify** | `Stop` | Auto-closing messagebox when Claude finishes (8s) |
 | **Exit Plan Mode** | `PermissionRequest` → `ExitPlanMode` | Topmost messagebox when plan is ready (auto-closes 25s) |
 
 - **Zero dependencies** — Python 3.10+ + tkinter, nothing else
 - **Cross-platform** — Windows, macOS, Linux
-- **Keyboard shortcuts** — Enter to Allow, Escape to Deny, number keys for suggestions
+- **Modern ttk styling** — themed widgets (vista/winnative/clam) for a clean native look
+- **Keyboard shortcuts** — Enter to Allow, Escape to Deny, number keys for suggestions, Ctrl+Enter to confirm in text areas
 - **No console flash** — uses `pythonw` on Windows (falls back to `python3` on macOS/Linux)
 
 ## Install
@@ -132,7 +133,7 @@ The AI reads `SKILL.md` and installs everything automatically.
 ## Limitations
 
 - **tkinter required** — most Python installations include it; Linux may need `python3-tk`
-- **No dark mode** — uses system default styling
+- **ttk themed** — uses native widget themes (vista on Windows, clam fallback on others); no custom color scheme
 - **DPI awareness** — optimized for Windows; macOS/Linux use system defaults
 
 ## License

@@ -6,11 +6,12 @@ Claude Code PreToolUse hook for AskUserQuestion.
 Triggered via settings.json:
   PreToolUse -> matcher: "AskUserQuestion"
 
-Reads JSON from stdin (UTF-8), shows question dialog with native
+Reads JSON from stdin (UTF-8), shows question dialog with ttk-themed
 Checkbutton (single select with mutual exclusion) or Checkbutton (multi select).
 Options whose label matches a "free-text" pattern (Other / 其他 / 自定义 / etc.)
-automatically reveal an Entry widget when selected, so the user can type a
-custom answer.  The typed text becomes the answer value instead of the label.
+automatically reveal a multi-line ScrolledText widget when selected, so the
+user can type a custom answer.  The typed text becomes the answer value
+instead of the label.
 
 Output format (per docs):
   hookSpecificOutput:
@@ -27,6 +28,7 @@ import os
 import re
 import sys
 import tkinter as tk
+from tkinter import scrolledtext, ttk
 
 # Ensure UTF-8 output for CJK content in the JSON decision. stdin is read via
 # sys.stdin.buffer.read() and decoded manually, so only stdout needs reconfiguring.
@@ -45,17 +47,38 @@ MAX_WIDTH = 580
 MAX_HEIGHT = 560
 MIN_HEIGHT = 200
 
-# Placeholder shown in free-text Entry widgets; referenced by both the focus
+# Placeholder shown in free-text Text widgets; referenced by both the focus
 # in/out handlers and answer collection, so it must be a single source of truth.
-_PLACEHOLDER = "Type your answer here..."
+_PLACEHOLDER = "\u8bf7\u8f93\u5165\u4f60\u7684\u56de\u7b54..."
 
-# Labels that should reveal a free-text Entry when selected.
+# Labels that should reveal a free-text Text widget when selected.
 # Case-insensitive substring match. \b on the English words prevents false
 # positives like "customer" or "customary" matching "custom".
 _FREE_TEXT_PATTERN = re.compile(
     r"(\bother\b|其他|自定义|\bcustom\b|自行|用户.*输入|自己.*说|输入.*内容|请.*输入|\bfill\s*in\b|\btype\s*your\b|手动)",
     re.IGNORECASE,
 )
+
+
+def _setup_style(root: tk.Tk):
+    """Configure ttk styles for a modern, clean look."""
+    style = ttk.Style(root)
+    for theme in ("vista", "winnative", "clam", "default"):
+        try:
+            style.theme_use(theme)
+            break
+        except tk.TclError:
+            continue
+
+    font_main = ("Microsoft YaHei UI", 10)
+    font_bold = ("Microsoft YaHei UI", 12, "bold")
+    font_btn = ("Microsoft YaHei UI", 10)
+
+    style.configure("Title.TLabel", font=font_bold, foreground="#1a1a1a")
+    style.configure("Body.TLabel", font=font_main, foreground="#333333")
+    style.configure("TButton", font=font_btn, padding=(16, 8))
+    style.configure("Accent.TButton", font=font_btn, padding=(16, 8))
+    style.configure("TCheckbutton", font=font_main)
 
 
 def _is_free_text_option(label: str) -> bool:
@@ -75,6 +98,29 @@ def _center_dialog(dialog: tk.Toplevel, width: int = None, height: int = None):
     dialog.minsize(400, MIN_HEIGHT)
 
 
+def _get_text_content(widget) -> str:
+    """Read text from a tk.Entry or tk.Text/ScrolledText widget, handling both APIs."""
+    if isinstance(widget, tk.Text):
+        return widget.get("1.0", "end-1c")
+    return widget.get()
+
+
+def _clear_text(widget):
+    """Clear text from a tk.Entry or tk.Text/ScrolledText widget."""
+    if isinstance(widget, tk.Text):
+        widget.delete("1.0", tk.END)
+    else:
+        widget.delete(0, tk.END)
+
+
+def _insert_text(widget, text: str):
+    """Insert text into a tk.Entry or tk.Text/ScrolledText widget."""
+    if isinstance(widget, tk.Text):
+        widget.insert("1.0", text)
+    else:
+        widget.insert(0, text)
+
+
 def _collect_answers(question_vars: list[dict]) -> dict:
     """Read answers from the live widgets. Must be called BEFORE dialog.destroy()."""
     answers = {}
@@ -89,7 +135,7 @@ def _collect_answers(question_vars: list[dict]) -> dict:
             label = options[i].get("label", "")
             if entry is not None:
                 try:
-                    text = entry.get().strip()
+                    text = _get_text_content(entry).strip()
                     if text and text != _PLACEHOLDER:
                         return text
                 except Exception:
@@ -132,6 +178,7 @@ def show_question_dialog(questions: list[dict]) -> dict | None:
     """
     root = tk.Tk()
     root.withdraw()
+    _setup_style(root)
 
     dialog = tk.Toplevel(root)
     dialog.title("Claude Code \u2014 Question")
@@ -142,31 +189,31 @@ def show_question_dialog(questions: list[dict]) -> dict | None:
     result_answers = {"value": None}   # filled in on_confirm before destroy
 
     # --- Bottom buttons (pack FIRST so they stay visible) ---
-    btn_area = tk.Frame(dialog)
+    btn_area = ttk.Frame(dialog)
     btn_area.pack(fill="x", padx=20, pady=(10, 15), side="bottom")
 
-    tk.Frame(btn_area, height=1, relief="sunken", bd=1).pack(fill="x", pady=(0, 10))
+    ttk.Separator(btn_area, orient="horizontal").pack(fill="x", pady=(0, 10))
 
-    action_frame = tk.Frame(btn_area)
+    action_frame = ttk.Frame(btn_area)
     action_frame.pack(fill="x")
 
-    tk.Frame(action_frame).pack(side="left", expand=True)
+    ttk.Frame(action_frame).pack(side="left", expand=True)
 
     def on_cancel():
         result_cancelled["value"] = True
         dialog.destroy()
 
-    tk.Button(action_frame, text="\u2715  Cancel", command=on_cancel,
-              padx=18, pady=6).pack(side="right", padx=(8, 0))
+    ttk.Button(action_frame, text="\u2715  \u53d6\u6d88", command=on_cancel,
+               ).pack(side="right", padx=(8, 0))
 
     def on_confirm():
         # Collect answers BEFORE destroying the dialog, so we can still
-        # read Entry widgets that may be inside the scrollable frame.
+        # read Text widgets that may be inside the scrollable frame.
         result_answers["value"] = _collect_answers(question_vars)
         dialog.destroy()
 
-    confirm_btn = tk.Button(action_frame, text="\u2713  Confirm", command=on_confirm,
-                            padx=18, pady=6)
+    confirm_btn = ttk.Button(action_frame, text="\u2713  \u786e\u8ba4", command=on_confirm,
+                             style="Accent.TButton")
     confirm_btn.pack(side="right")
 
     confirm_btn.focus_set()
@@ -175,20 +222,20 @@ def show_question_dialog(questions: list[dict]) -> dict | None:
     dialog.protocol("WM_DELETE_WINDOW", on_cancel)
 
     # --- Title ---
-    tk.Label(dialog, text="Claude is asking a question",
-             anchor="w").pack(fill="x", padx=20, pady=(15, 8))
+    ttk.Label(dialog, text="Claude \u6709\u4e00\u4e2a\u95ee\u9898\u8981\u95ee\u4f60",
+              style="Title.TLabel", anchor="w").pack(fill="x", padx=20, pady=(15, 8))
 
-    tk.Frame(dialog, height=1, relief="sunken", bd=1).pack(fill="x", padx=20)
+    ttk.Separator(dialog, orient="horizontal").pack(fill="x", padx=20)
 
     # --- Scrollable content ---
-    scroll_container = tk.Frame(dialog)
+    scroll_container = ttk.Frame(dialog)
     scroll_container.pack(fill="both", expand=True)
 
-    canvas = tk.Canvas(scroll_container, highlightthickness=0)
-    scrollbar = tk.Scrollbar(scroll_container, orient="vertical", command=canvas.yview)
+    canvas = tk.Canvas(scroll_container, highlightthickness=0, bg="#ffffff")
+    scrollbar = ttk.Scrollbar(scroll_container, orient="vertical", command=canvas.yview)
     canvas.configure(yscrollcommand=scrollbar.set)
 
-    scroll_frame = tk.Frame(canvas)
+    scroll_frame = ttk.Frame(canvas)
     scroll_window = canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
 
     def on_frame_configure(event):
@@ -210,46 +257,48 @@ def show_question_dialog(questions: list[dict]) -> dict | None:
 
     # --- Build questions ---
     # Each entry: {"question": str, "multi": bool, "vars": list[BooleanVar],
-    #              "options": list[dict], "entries": list[tk.Entry|None]}
-    # entries[i] is an Entry widget if the option at index i is a free-text option,
+    #              "options": list[dict], "entries": list[tk.Text|None]}
+    # entries[i] is a Text widget if the option at index i is a free-text option,
     # else None.
     question_vars: list[dict] = []
 
     for q_idx, q in enumerate(questions):
-        q_frame = tk.Frame(scroll_frame)
+        q_frame = ttk.Frame(scroll_frame)
         q_frame.pack(fill="x", padx=20, pady=(12, 4))
 
-        # Header chip
+        # Header chip — keep tk.Label for relief="groove" (ttk.Label lacks relief)
         header = q.get("header", "")
         if header:
             tk.Label(q_frame, text=header, relief="groove", bd=1,
-                     padx=6, pady=2).pack(anchor="w", pady=(0, 6))
+                     padx=6, pady=2, font=("Microsoft YaHei UI", 9),
+                     fg="#555555").pack(anchor="w", pady=(0, 6))
 
-        # Question text
+        # Question text — keep tk.Label for wraplength (ttk.Label lacks it)
         question_text = q.get("question", "")
         tk.Label(q_frame, text=question_text, wraplength=520,
-                 justify="left", anchor="w").pack(fill="x", anchor="w", pady=(0, 8))
+                 justify="left", anchor="w",
+                 font=("Microsoft YaHei UI", 10),
+                 fg="#1a1a1a").pack(fill="x", anchor="w", pady=(0, 8))
 
         options = q.get("options", [])
         multi = q.get("multiSelect", False)
 
         cb_vars: list[tk.BooleanVar] = []
-        entry_widgets: list[tk.Entry | None] = []
+        entry_widgets: list[scrolledtext.ScrolledText | None] = []
 
         def _build_option(opt, parent_frame, vars_list, entries_list):
-            """Build one option row: checkbox + optional free-text entry."""
+            """Build one option row: checkbox + optional free-text area."""
             label_text = opt.get("label", "")
             is_free = _is_free_text_option(label_text)
 
             var = tk.BooleanVar(value=False)
             vars_list.append(var)
 
-            opt_frame = tk.Frame(parent_frame)
+            opt_frame = ttk.Frame(parent_frame)
             opt_frame.pack(fill="x", pady=(0, 2))
 
-            cb = tk.Checkbutton(
+            cb = ttk.Checkbutton(
                 opt_frame, text=label_text, variable=var,
-                anchor="w", wraplength=520,
             )
             cb.pack(anchor="w", padx=4)
 
@@ -257,8 +306,6 @@ def show_question_dialog(questions: list[dict]) -> dict | None:
             # should also toggle the variable.  We bind to opt_frame but ONLY act
             # when the click lands directly on opt_frame (not on a child widget like
             # the Checkbutton), to avoid double-toggling via event bubbling.
-            # The Checkbutton's own built-in <Button-1> handler already toggles the
-            # variable — we must NOT add another binding on cb itself.
             def _make_frame_toggle(v, frame):
                 def onClick(event):
                     if event.widget is frame:
@@ -267,46 +314,56 @@ def show_question_dialog(questions: list[dict]) -> dict | None:
             _toggle = _make_frame_toggle(var, opt_frame)
             opt_frame.bind("<Button-1>", _toggle)
 
-            # Description label
+            # Description label — keep tk.Label for wraplength
             desc = opt.get("description", "")
             if desc:
                 desc_lbl = tk.Label(opt_frame, text=desc, wraplength=500,
-                                    justify="left", anchor="w")
+                                    justify="left", anchor="w",
+                                    font=("Microsoft YaHei UI", 9),
+                                    fg="#666666")
                 desc_lbl.pack(anchor="w", padx=28, pady=(0, 2))
-                # desc_lbl is a leaf widget (no children), so a plain toggle is safe.
                 desc_lbl.bind("<Button-1>", lambda e, v=var: v.set(not v.get()))
 
-            # Free-text entry (hidden until the option is selected)
+            # Free-text area (hidden until the option is selected)
             if is_free:
-                entry_frame = tk.Frame(opt_frame)
-                entry = tk.Entry(entry_frame, width=46)
-                entry.pack(side="left", padx=(0, 4))
+                entry_frame = ttk.Frame(opt_frame)
+                entry = scrolledtext.ScrolledText(
+                    entry_frame, wrap="word", height=4, width=50,
+                    font=("Microsoft YaHei UI", 10),
+                    relief="flat", highlightthickness=1,
+                    highlightbackground="#cccccc",
+                )
+                entry.pack(fill="x", padx=(0, 4))
 
                 # Placeholder hint
-                entry.insert(0, _PLACEHOLDER)
+                _insert_text(entry, _PLACEHOLDER)
                 entry.config(fg="grey")
 
                 def _on_focus_in(e, ent=entry, ph=_PLACEHOLDER):
-                    if ent.get() == ph:
-                        ent.delete(0, tk.END)
+                    if _get_text_content(ent) == ph:
+                        _clear_text(ent)
                         ent.config(fg="black")
 
                 def _on_focus_out(e, ent=entry, ph=_PLACEHOLDER):
-                    if not ent.get():
-                        ent.insert(0, ph)
+                    if not _get_text_content(ent).strip():
+                        _clear_text(ent)
+                        _insert_text(ent, ph)
                         ent.config(fg="grey")
 
                 entry.bind("<FocusIn>", _on_focus_in)
                 entry.bind("<FocusOut>", _on_focus_out)
 
+                # Ctrl+Enter to confirm while typing in the text area
+                entry.bind("<Control-Return>", lambda e: on_confirm())
+
                 # Show/hide based on checkbox state
                 def _update_entry_visibility(v=var, ef=entry_frame, ent=entry, ph=_PLACEHOLDER):
                     if v.get():
-                        ef.pack(anchor="w", padx=28, pady=(2, 4))
+                        ef.pack(fill="x", padx=28, pady=(2, 4))
                         # Focus the entry so user can type right away
                         ent.after(50, lambda: ent.focus_set())
-                        if ent.get() == ph:
-                            ent.delete(0, tk.END)
+                        if _get_text_content(ent) == ph:
+                            _clear_text(ent)
                             ent.config(fg="black")
                     else:
                         ef.pack_forget()
@@ -342,7 +399,7 @@ def show_question_dialog(questions: list[dict]) -> dict | None:
 
         # Separator between questions
         if q_idx < len(questions) - 1:
-            tk.Frame(scroll_frame, height=1, relief="sunken", bd=1).pack(
+            ttk.Separator(scroll_frame, orient="horizontal").pack(
                 fill="x", padx=20, pady=(8, 0))
 
     _center_dialog(dialog, width=MAX_WIDTH, height=MAX_HEIGHT)

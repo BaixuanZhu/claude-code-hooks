@@ -12,7 +12,7 @@ import json
 import os
 import sys
 import tkinter as tk
-from tkinter import scrolledtext
+from tkinter import scrolledtext, ttk
 
 # Ensure UTF-8 output for CJK content in the JSON decision. stdin is read via
 # sys.stdin.buffer.read() and decoded manually, so only stdout needs reconfiguring.
@@ -32,16 +32,38 @@ MAX_HEIGHT = 520
 MIN_HEIGHT = 160
 
 SUGGESTION_LABELS = {
-    ("addRules", "allow", "session"):       "Allow for Session",
-    ("addRules", "allow", "localSettings"): "Always Allow (Project)",
-    ("addRules", "allow", "userSettings"):  "Always Allow (Global)",
-    ("addRules", "deny", "session"):        "Deny for Session",
-    ("addRules", "deny", "localSettings"):  "Always Deny (Project)",
-    ("addRules", "deny", "userSettings"):   "Always Deny (Global)",
-    ("setMode", "auto", "session"):         "Auto Approve (Session)",
-    ("setMode", "auto", "localSettings"):   "Auto Approve (Project)",
-    ("setMode", "plan", "session"):         "Plan Mode (Session)",
+    ("addRules", "allow", "session"):       "\u5141\u8bb8\uff08\u672c\u6b21\u4f1a\u8bdd\uff09",
+    ("addRules", "allow", "localSettings"): "\u59cb\u7ec8\u5141\u8bb8\uff08\u9879\u76ee\uff09",
+    ("addRules", "allow", "userSettings"):  "\u59cb\u7ec8\u5141\u8bb8\uff08\u5168\u5c40\uff09",
+    ("addRules", "deny", "session"):        "\u62d2\u7edd\uff08\u672c\u6b21\u4f1a\u8bdd\uff09",
+    ("addRules", "deny", "localSettings"):  "\u59cb\u7ec8\u62d2\u7edd\uff08\u9879\u76ee\uff09",
+    ("addRules", "deny", "userSettings"):   "\u59cb\u7ec8\u62d2\u7edd\uff08\u5168\u5c40\uff09",
+    ("setMode", "auto", "session"):         "\u81ea\u52a8\u6279\u51c6\uff08\u672c\u6b21\u4f1a\u8bdd\uff09",
+    ("setMode", "auto", "localSettings"):   "\u81ea\u52a8\u6279\u51c6\uff08\u9879\u76ee\uff09",
+    ("setMode", "plan", "session"):         "\u8ba1\u5212\u6a21\u5f0f\uff08\u672c\u6b21\u4f1a\u8bdd\uff09",
 }
+
+
+def _setup_style(root: tk.Tk):
+    """Configure ttk styles for a modern, clean look."""
+    style = ttk.Style(root)
+    # Use the most modern available theme on each platform.
+    for theme in ("vista", "winnative", "clam", "default"):
+        try:
+            style.theme_use(theme)
+            break
+        except tk.TclError:
+            continue
+
+    font_main = ("Microsoft YaHei UI", 10)
+    font_bold = ("Microsoft YaHei UI", 12, "bold")
+    font_btn = ("Microsoft YaHei UI", 10)
+
+    style.configure("Title.TLabel", font=font_bold, foreground="#1a1a1a")
+    style.configure("Body.TLabel", font=font_main, foreground="#333333")
+    style.configure("TButton", font=font_btn, padding=(16, 8))
+    style.configure("Accent.TButton", font=font_btn, padding=(16, 8))
+    style.configure("Suggestion.TButton", font=font_main, padding=(12, 6))
 
 
 def get_suggestion_label(suggestion: dict) -> str:
@@ -52,7 +74,7 @@ def get_suggestion_label(suggestion: dict) -> str:
     behavior = suggestion.get("behavior") or suggestion.get("decision", {}).get("behavior", "")
     dest = suggestion.get("destination") or suggestion.get("decision", {}).get("destination", "")
     sug_type = suggestion.get("type", "")
-    return SUGGESTION_LABELS.get((sug_type, behavior, dest), "Apply Rule")
+    return SUGGESTION_LABELS.get((sug_type, behavior, dest), "\u5e94\u7528\u89c4\u5219")
 
 
 def shorten_path(path: str) -> str:
@@ -69,28 +91,28 @@ def build_permission_message(data: dict) -> tuple[str, str]:
 
     if tool_name == "Bash":
         cmd = tool_input.get("command", "")
-        title = "Bash Command"
-        body = cmd if cmd else "(empty command)"
+        title = "Bash \u547d\u4ee4"
+        body = cmd if cmd else "(\u7a7a\u547d\u4ee4)"
         if len(body) > 300:
-            body = body[:300] + "\n... (truncated)"
+            body = body[:300] + "\n... (\u5df2\u622a\u65ad)"
     elif tool_name == "Edit":
-        title = "Edit File"
+        title = "\u7f16\u8f91\u6587\u4ef6"
         body = shorten_path(tool_input.get("file_path", "Unknown"))
     elif tool_name == "Write":
-        title = "Write File"
+        title = "\u5199\u5165\u6587\u4ef6"
         body = shorten_path(tool_input.get("file_path", "Unknown"))
     elif tool_name == "Read":
-        title = "Read File"
+        title = "\u8bfb\u53d6\u6587\u4ef6"
         body = shorten_path(tool_input.get("file_path", "Unknown"))
     else:
-        title = f"Permission \u2014 {tool_name}"
+        title = f"\u6743\u9650 \u2014 {tool_name}"
         display = {}
         for k, v in list(tool_input.items())[:5]:
             s = str(v)
             display[k] = s[:80] + "..." if len(s) > 80 else s
         body = json.dumps(display, ensure_ascii=False, indent=2)
         if len(body) > 200:
-            body = body[:200] + "\n... (truncated)"
+            body = body[:200] + "\n... (\u5df2\u622a\u65ad)"
 
     return title, body
 
@@ -121,39 +143,41 @@ def _center_dialog(dialog: tk.Toplevel, width: int = None, height: int = None):
 def show_permission_dialog(title: str, body: str, suggestions: list[dict]) -> tuple[str, dict | None]:
     root = tk.Tk()
     root.withdraw()
+    _setup_style(root)
 
     dialog = tk.Toplevel(root)
     dialog.title("Claude Code")
     dialog.resizable(True, False)
     dialog.attributes("-topmost", True)
 
-    # Title
-    # "Microsoft YaHei UI" renders CJK text sharply on Windows; tkinter
-    # auto-falls back to the system default font on macOS/Linux.
-    tk.Label(dialog, text=title, font=("Microsoft YaHei UI", 12, "bold"),
-             anchor="w").pack(fill="x", padx=20, pady=(15, 8))
+    # --- Title ---
+    ttk.Label(dialog, text=title, style="Title.TLabel",
+              anchor="w").pack(fill="x", padx=20, pady=(15, 8))
 
-    tk.Frame(dialog, height=1, relief="sunken", bd=1).pack(fill="x", padx=20)
+    ttk.Separator(dialog, orient="horizontal").pack(fill="x", padx=20)
 
-    # Scrollable content
-    content_frame = tk.Frame(dialog)
+    # --- Scrollable content ---
+    content_frame = ttk.Frame(dialog)
     content_frame.pack(fill="both", expand=True, padx=10, pady=8)
 
     text_widget = scrolledtext.ScrolledText(
         content_frame, wrap="word", height=6,
         padx=10, pady=8, state="normal",
+        font=("Microsoft YaHei UI", 10),
+        relief="flat", highlightthickness=1,
+        highlightbackground="#cccccc",
     )
     text_widget.pack(fill="both", expand=True)
     text_widget.insert("1.0", body)
     text_widget.configure(state="disabled")
 
-    tk.Frame(dialog, height=1, relief="sunken", bd=1).pack(fill="x", padx=20)
+    ttk.Separator(dialog, orient="horizontal").pack(fill="x", padx=20)
 
     # --- Bottom: Allow/Deny (pack FIRST with side=bottom) ---
-    action_frame = tk.Frame(dialog)
+    action_frame = ttk.Frame(dialog)
     action_frame.pack(fill="x", padx=20, pady=(10, 15), side="bottom")
 
-    tk.Frame(action_frame).pack(side="left", expand=True)
+    ttk.Frame(action_frame).pack(side="left", expand=True)
 
     result = {"behavior": None, "suggestion": None}
 
@@ -165,14 +189,14 @@ def show_permission_dialog(title: str, body: str, suggestions: list[dict]) -> tu
     def on_deny():
         make_decision("deny", None)
 
-    tk.Button(action_frame, text="\u2715  Deny", command=on_deny,
-              padx=18, pady=6).pack(side="right", padx=(8, 0))
+    ttk.Button(action_frame, text="\u2715  \u62d2\u7edd", command=on_deny,
+               ).pack(side="right", padx=(8, 0))
 
     def on_allow():
         make_decision("allow", None)
 
-    allow_btn = tk.Button(action_frame, text="\u2713  Allow", command=on_allow,
-                          padx=18, pady=6)
+    allow_btn = ttk.Button(action_frame, text="\u2713  \u5141\u8bb8", command=on_allow,
+                           style="Accent.TButton")
     allow_btn.pack(side="right")
 
     allow_btn.focus_set()
@@ -182,12 +206,12 @@ def show_permission_dialog(title: str, body: str, suggestions: list[dict]) -> tu
 
     # --- Suggestion buttons (pack SECOND with side=bottom, above Allow/Deny) ---
     if suggestions:
-        sug_frame = tk.Frame(dialog)
+        sug_frame = ttk.Frame(dialog)
         sug_frame.pack(fill="x", padx=20, side="bottom")
 
-        tk.Frame(sug_frame, height=1, relief="sunken", bd=1).pack(fill="x", pady=(0, 8))
+        ttk.Separator(sug_frame, orient="horizontal").pack(fill="x", pady=(0, 8))
 
-        sug_inner = tk.Frame(sug_frame)
+        sug_inner = ttk.Frame(sug_frame)
         sug_inner.pack(anchor="w")
 
         col = 0
@@ -206,9 +230,9 @@ def show_permission_dialog(title: str, body: str, suggestions: list[dict]) -> tu
             def on_suggestion(s=sug, b=sug_behavior):
                 make_decision(b, s)
 
-            tk.Button(
+            ttk.Button(
                 sug_inner, text=f"{idx}. {label}", command=on_suggestion,
-                width=22, anchor="w", padx=12, pady=5,
+                style="Suggestion.TButton", width=20,
             ).grid(row=col // max_cols, column=col % max_cols, padx=(0, 8), pady=(0, 4), sticky="w")
             col += 1
 
