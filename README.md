@@ -212,6 +212,7 @@ Set `<PYTHON>` to `pythonw` on Windows or `python3` on macOS/Linux, and `<SCRIPT
 
 - **Permission suggestions** — deny suggestions are marked "this time only" because Claude Code's `updatedPermissions` is allow-only; a deny rule cannot be persisted from a dialog. Use `/permissions` for permanent deny rules.
 - **Language** — `CLAUDE_GUI_HOOKS_LANG=zh|en` wins; otherwise a real locale in `LC_ALL`/`LC_MESSAGES`/`LANG` (C/POSIX placeholders are ignored), otherwise the Windows UI language, otherwise English. The deny message sent back to Claude stays English.
+- **Project context** — notification titles append the project folder name from the hook payload's `cwd`, so dialogs from concurrent sessions are distinguishable.
 - **Serialized dialogs** — all dialogs share a cross-process lock in the temp directory. Permission and question dialogs wait up to 60s for the current dialog to close, then show anyway; notification popups are dropped while another dialog is open. A crashed hook cannot leave a stale lock because the OS releases it.
 - **Headless runs** — `CI` or `CLAUDE_GUI_HOOKS_DISABLE=1` makes every hook exit silently, so `-p` runs and CI pipelines never pop a dialog.
 - **Windows without Git Bash (plugin install)** — hooks fail to start and `onFailure: "continue"` lets the tool call proceed without a dialog. The PowerShell installer avoids this.

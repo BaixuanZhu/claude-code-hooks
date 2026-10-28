@@ -758,6 +758,16 @@ def test_tr_formats_and_falls_back():
     assert hook_common.tr("missing.key", default="x") == "x"
 
 
+def test_with_project_appends_cwd_basename():
+    title = "Claude Code - Done"
+    assert hook_common.with_project(
+        title, {"cwd": "G:\\CodeBuddy-workspace\\my-app"}) == f"{title} \u00b7 my-app"
+    assert hook_common.with_project(
+        title, {"cwd": "/home/me/my-app/"}) == f"{title} \u00b7 my-app"
+    assert hook_common.with_project(title, {}) == title
+    assert hook_common.with_project(title, {"cwd": ""}) == title
+
+
 def _placeholders(template: str) -> set:
     return {field for _, field, _, _ in string.Formatter().parse(template) if field}
 

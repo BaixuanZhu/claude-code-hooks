@@ -62,13 +62,15 @@ def main():
     payload = _build_message(data)
     if payload is None:
         sys.exit(0)
+    title, message = payload
+    title = hook_common.with_project(title, data)
 
     lock = hook_common.acquire_dialog_lock(0)
     if lock is None:
         sys.exit(0)
 
     try:
-        show_notification(*payload)
+        show_notification(title, message)
     except tk.TclError:
         pass
     finally:

@@ -68,7 +68,7 @@ def _build_message(data: dict) -> str:
     return base
 
 
-def show_notification(message: str):
+def show_notification(message: str, title: str):
     root = tk.Tk()
     root.withdraw()  # hide root window
     root.attributes("-topmost", True)
@@ -82,7 +82,7 @@ def show_notification(message: str):
     root.after(AUTO_CLOSE_MS, root.destroy)
 
     messagebox.showinfo(
-        hook_common.tr("plan.window_title"),
+        title,
         message,
         parent=root,
     )
@@ -97,13 +97,14 @@ def main():
 
     data = hook_common.read_stdin_json()
     message = _build_message(data)
+    title = hook_common.with_project(hook_common.tr("plan.window_title"), data)
 
     lock = hook_common.acquire_dialog_lock(0)
     if lock is None:
         sys.exit(0)
 
     try:
-        show_notification(message)
+        show_notification(message, title)
     except tk.TclError:
         # No display available; never delay the plan approval prompt.
         pass

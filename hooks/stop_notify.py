@@ -100,6 +100,7 @@ def main():
 
     data = hook_common.read_stdin_json()
     title, message = _build_message(data)
+    title = hook_common.with_project(title, data)
 
     # Notifications never queue: if a permission/question dialog is open, a
     # stale notification popping on top of it helps nobody.

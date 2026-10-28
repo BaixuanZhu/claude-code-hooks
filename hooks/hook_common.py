@@ -273,6 +273,13 @@ def read_stdin_json() -> dict:
         return {}
 
 
+def with_project(title: str, data: dict) -> str:
+    """Append the project folder name (from the hook payload's cwd) to a title."""
+    cwd = (data.get("cwd") or "").strip()
+    project = cwd.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1] if cwd else ""
+    return f"{title} \u00b7 {project}" if project else title
+
+
 def enable_high_dpi():
     """Per-monitor DPI awareness on Windows so dialogs aren't blurry."""
     if sys.platform != "win32":
