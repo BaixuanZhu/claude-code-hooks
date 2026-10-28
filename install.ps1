@@ -22,7 +22,8 @@ $Scripts   = @(
     "ask_user_question.py",
     "stop_notify.py",
     "exit_plan_mode_notify.py",
-    "notification_notify.py"
+    "notification_notify.py",
+    "hook_common.py"
 )
 
 function Write-Step($msg)  { Write-Host "`n== $msg ==" -ForegroundColor Cyan }

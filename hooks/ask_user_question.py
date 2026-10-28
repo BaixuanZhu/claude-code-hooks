@@ -22,7 +22,6 @@ Output format (per docs):
       answers: {"question text": "selected label or custom text"}
 """
 
-import ctypes
 import json
 import os
 import re
@@ -30,26 +29,27 @@ import sys
 import tkinter as tk
 from tkinter import scrolledtext, ttk
 
+_HOOKS_DIR = os.path.dirname(os.path.abspath(__file__))
+if _HOOKS_DIR not in sys.path:
+    sys.path.insert(0, _HOOKS_DIR)
+import hook_common
+
 # Ensure UTF-8 output for CJK content in the JSON decision. stdin is read via
 # sys.stdin.buffer.read() and decoded manually, so only stdout needs reconfiguring.
 sys.stdout.reconfigure(encoding="utf-8")
 
-# High-DPI awareness so dialogs aren't blurry on scaled displays.
-try:
-    ctypes.windll.shcore.SetProcessDpiAwareness(1)  # per-monitor V2 (Win 8.1+)
-except (AttributeError, OSError):
-    try:
-        ctypes.windll.user32.SetProcessDPIAware()  # legacy fallback (Vista+)
-    except (AttributeError, OSError):
-        pass
+hook_common.enable_high_dpi()
 
 MAX_WIDTH = 580
 MAX_HEIGHT = 560
 MIN_HEIGHT = 200
 
-# Placeholder shown in free-text Text widgets; referenced by both the focus
-# in/out handlers and answer collection, so it must be a single source of truth.
-_PLACEHOLDER = "\u8bf7\u8f93\u5165\u4f60\u7684\u56de\u7b54..."
+LOCK_WAIT_SECONDS = 60
+
+
+def _placeholder() -> str:
+    """Placeholder shown in free-text widgets (single source of truth)."""
+    return hook_common.tr("ask.placeholder")
 
 # Labels that should reveal a free-text Text widget when selected.
 # Case-insensitive substring match. \b on the English words prevents false
@@ -63,16 +63,11 @@ _FREE_TEXT_PATTERN = re.compile(
 def _setup_style(root: tk.Tk):
     """Configure ttk styles for a modern, clean look."""
     style = ttk.Style(root)
-    for theme in ("vista", "winnative", "clam", "default"):
-        try:
-            style.theme_use(theme)
-            break
-        except tk.TclError:
-            continue
+    hook_common.apply_theme(style)
 
-    font_main = ("Microsoft YaHei UI", 10)
-    font_bold = ("Microsoft YaHei UI", 12, "bold")
-    font_btn = ("Microsoft YaHei UI", 10)
+    font_main = hook_common.ui_font(10)
+    font_bold = hook_common.ui_font(12, bold=True)
+    font_btn = hook_common.ui_font(10)
 
     style.configure("Title.TLabel", font=font_bold, foreground="#1a1a1a")
     style.configure("Body.TLabel", font=font_main, foreground="#333333")
@@ -136,7 +131,7 @@ def _collect_answers(question_vars: list[dict]) -> dict:
             if entry is not None:
                 try:
                     text = _get_text_content(entry).strip()
-                    if text and text != _PLACEHOLDER:
+                    if text and text != _placeholder():
                         return text
                 except Exception:
                     pass
@@ -157,11 +152,6 @@ def _collect_answers(question_vars: list[dict]) -> dict:
             else:
                 answers[qv["question"]] = options[0].get("label", "") if options else ""
     return answers
-
-
-def _gui_disabled() -> bool:
-    """True in CI or when the user opted out; hooks then leave the normal flow alone."""
-    return os.environ.get("CLAUDE_GUI_HOOKS_DISABLE") == "1" or bool(os.environ.get("CI"))
 
 
 def _deny(reason: str):
@@ -186,7 +176,7 @@ def show_question_dialog(questions: list[dict]) -> dict | None:
     _setup_style(root)
 
     dialog = tk.Toplevel(root)
-    dialog.title("Claude Code \u2014 Question")
+    dialog.title(hook_common.tr("ask.window_title"))
     dialog.resizable(True, True)
     dialog.attributes("-topmost", True)
 
@@ -208,7 +198,7 @@ def show_question_dialog(questions: list[dict]) -> dict | None:
         result_cancelled["value"] = True
         dialog.destroy()
 
-    ttk.Button(action_frame, text="\u2715  \u53d6\u6d88", command=on_cancel,
+    ttk.Button(action_frame, text=hook_common.tr("ask.cancel"), command=on_cancel,
                ).pack(side="right", padx=(8, 0))
 
     def on_confirm():
@@ -217,7 +207,7 @@ def show_question_dialog(questions: list[dict]) -> dict | None:
         result_answers["value"] = _collect_answers(question_vars)
         dialog.destroy()
 
-    confirm_btn = ttk.Button(action_frame, text="\u2713  \u786e\u8ba4", command=on_confirm,
+    confirm_btn = ttk.Button(action_frame, text=hook_common.tr("ask.confirm"), command=on_confirm,
                              style="Accent.TButton")
     confirm_btn.pack(side="right")
 
@@ -227,7 +217,7 @@ def show_question_dialog(questions: list[dict]) -> dict | None:
     dialog.protocol("WM_DELETE_WINDOW", on_cancel)
 
     # --- Title ---
-    ttk.Label(dialog, text="Claude \u6709\u4e00\u4e2a\u95ee\u9898\u8981\u95ee\u4f60",
+    ttk.Label(dialog, text=hook_common.tr("ask.heading"),
               style="Title.TLabel", anchor="w").pack(fill="x", padx=20, pady=(15, 8))
 
     ttk.Separator(dialog, orient="horizontal").pack(fill="x", padx=20)
@@ -275,14 +265,14 @@ def show_question_dialog(questions: list[dict]) -> dict | None:
         header = q.get("header", "")
         if header:
             tk.Label(q_frame, text=header, relief="groove", bd=1,
-                     padx=6, pady=2, font=("Microsoft YaHei UI", 9),
+                     padx=6, pady=2, font=hook_common.ui_font(9),
                      fg="#555555").pack(anchor="w", pady=(0, 6))
 
         # Question text — keep tk.Label for wraplength (ttk.Label lacks it)
         question_text = q.get("question", "")
         tk.Label(q_frame, text=question_text, wraplength=520,
                  justify="left", anchor="w",
-                 font=("Microsoft YaHei UI", 10),
+                 font=hook_common.ui_font(10),
                  fg="#1a1a1a").pack(fill="x", anchor="w", pady=(0, 8))
 
         options = q.get("options", [])
@@ -324,7 +314,7 @@ def show_question_dialog(questions: list[dict]) -> dict | None:
             if desc:
                 desc_lbl = tk.Label(opt_frame, text=desc, wraplength=500,
                                     justify="left", anchor="w",
-                                    font=("Microsoft YaHei UI", 9),
+                                    font=hook_common.ui_font(9),
                                     fg="#666666")
                 desc_lbl.pack(anchor="w", padx=28, pady=(0, 2))
                 desc_lbl.bind("<Button-1>", lambda e, v=var: v.set(not v.get()))
@@ -334,25 +324,25 @@ def show_question_dialog(questions: list[dict]) -> dict | None:
                 entry_frame = ttk.Frame(opt_frame)
                 entry = scrolledtext.ScrolledText(
                     entry_frame, wrap="word", height=4, width=50,
-                    font=("Microsoft YaHei UI", 10),
+                    font=hook_common.ui_font(10),
                     relief="flat", highlightthickness=1,
                     highlightbackground="#cccccc",
                 )
                 entry.pack(fill="x", padx=(0, 4))
 
                 # Placeholder hint
-                _insert_text(entry, _PLACEHOLDER)
+                _insert_text(entry, _placeholder())
                 entry.config(fg="grey")
 
-                def _on_focus_in(e, ent=entry, ph=_PLACEHOLDER):
-                    if _get_text_content(ent) == ph:
+                def _on_focus_in(e, ent=entry):
+                    if _get_text_content(ent) == _placeholder():
                         _clear_text(ent)
                         ent.config(fg="black")
 
-                def _on_focus_out(e, ent=entry, ph=_PLACEHOLDER):
+                def _on_focus_out(e, ent=entry):
                     if not _get_text_content(ent).strip():
                         _clear_text(ent)
-                        _insert_text(ent, ph)
+                        _insert_text(ent, _placeholder())
                         ent.config(fg="grey")
 
                 entry.bind("<FocusIn>", _on_focus_in)
@@ -362,12 +352,12 @@ def show_question_dialog(questions: list[dict]) -> dict | None:
                 entry.bind("<Control-Return>", lambda e: on_confirm())
 
                 # Show/hide based on checkbox state
-                def _update_entry_visibility(v=var, ef=entry_frame, ent=entry, ph=_PLACEHOLDER):
+                def _update_entry_visibility(v=var, ef=entry_frame, ent=entry):
                     if v.get():
                         ef.pack(fill="x", padx=28, pady=(2, 4))
                         # Focus the entry so user can type right away
                         ent.after(50, lambda: ent.focus_set())
-                        if _get_text_content(ent) == ph:
+                        if _get_text_content(ent) == _placeholder():
                             _clear_text(ent)
                             ent.config(fg="black")
                     else:
@@ -453,7 +443,7 @@ def main():
     if not isinstance(data, dict):
         _deny("Invalid hook input")
 
-    if _gui_disabled():
+    if hook_common.gui_disabled():
         # Leave the request to Claude Code's normal AskUserQuestion flow.
         sys.exit(0)
 
@@ -464,7 +454,12 @@ def main():
         _deny("No questions found in input")
 
     try:
-        answers = show_question_dialog(questions)
+        lock = hook_common.acquire_dialog_lock(LOCK_WAIT_SECONDS)
+        try:
+            answers = show_question_dialog(questions)
+        finally:
+            if lock is not None:
+                lock.release()
     except tk.TclError:
         # No display (headless Linux, SSH, CI): leave the flow unchanged.
         sys.exit(0)

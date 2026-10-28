@@ -13,37 +13,21 @@ handing it to hooks, so we read stdin to surface a one-line preview of what the
 plan is about (falling back to a generic prompt when no plan is available).
 """
 
-import ctypes
-import json
 import os
 import re
 import sys
 import tkinter as tk
 from tkinter import messagebox
 
+_HOOKS_DIR = os.path.dirname(os.path.abspath(__file__))
+if _HOOKS_DIR not in sys.path:
+    sys.path.insert(0, _HOOKS_DIR)
+import hook_common
+
+hook_common.enable_high_dpi()
+
 AUTO_CLOSE_MS = 25000  # 25 seconds
 MAX_PREVIEW = 120      # cap the in-dialog plan preview length
-
-# High-DPI awareness so dialogs aren't blurry on scaled displays.
-try:
-    ctypes.windll.shcore.SetProcessDpiAwareness(1)  # per-monitor V2 (Win 8.1+)
-except (AttributeError, OSError):
-    try:
-        ctypes.windll.user32.SetProcessDPIAware()  # legacy fallback (Vista+)
-    except (AttributeError, OSError):
-        pass
-
-
-def _read_stdin_json() -> dict:
-    """Best-effort UTF-8 JSON read from stdin. Returns {} on any failure."""
-    try:
-        raw = sys.stdin.buffer.read()
-        if not raw:
-            return {}
-        data = json.loads(raw.decode("utf-8"))
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
 
 
 def _truncate(text: str, max_len: int = MAX_PREVIEW) -> str:
@@ -54,30 +38,34 @@ def _truncate(text: str, max_len: int = MAX_PREVIEW) -> str:
     return text
 
 
-def _gui_disabled() -> bool:
-    """True in CI or when the user opted out."""
-    return os.environ.get("CLAUDE_GUI_HOOKS_DISABLE") == "1" or bool(os.environ.get("CI"))
-
-
 def _build_message(data: dict) -> str:
     """Build the dialog body, including a short plan preview when available."""
+    base = hook_common.tr("plan.body")
     plan = ""
     tool_input = data.get("tool_input") or {}
     if isinstance(tool_input, dict):
         plan = (tool_input.get("plan") or "").strip()
 
     if plan:
-        # Take the first meaningful (non-empty, non-heading) line as the gist.
+        # Prefer the first content line (headings say less); fall back to the
+        # first heading, then to raw text, when the plan has nothing else.
+        heading_line = ""
         for line in plan.splitlines():
-            line = line.strip().lstrip("#").lstrip("*").strip()
-            if line:
-                preview = _truncate(line)
-                return f"Plan is ready. Please review and approve.\n\n{preview}"
-        # Plan had content but no usable line — show truncated raw text.
-        preview = _truncate(plan)
-        return f"Plan is ready. Please review and approve.\n\n{preview}"
+            stripped = line.strip()
+            if not stripped:
+                continue
+            text = stripped.lstrip("#").lstrip("*").strip()
+            if not text:
+                continue
+            if stripped.startswith("#"):
+                heading_line = heading_line or text
+                continue
+            return f"{base}\n\n{_truncate(text)}"
+        if heading_line:
+            return f"{base}\n\n{_truncate(heading_line)}"
+        return f"{base}\n\n{_truncate(plan)}"
 
-    return "Plan is ready. Please review and approve."
+    return base
 
 
 def show_notification(message: str):
@@ -88,13 +76,13 @@ def show_notification(message: str):
     # Auto-close: this is the ONLY place we destroy root. We intentionally do
     # NOT call root.destroy() after showinfo() returns: in Python 3.14
     # root.destroy() tears down the whole Tcl interpreter, so any later Tk call
-    # (even winfo_exists) raises "can't invoke ... : application has been
-    # destroyed". When the user clicks OK, showinfo returns and main() does
-    # sys.exit(0), which cleans up the process — no explicit destroy needed.
+    # (even winfo_exists) raises "can't invoke ... : application has been destroyed".
+    # When the user clicks OK, showinfo returns and main() does sys.exit(0),
+    # which cleans up the process — no explicit destroy needed.
     root.after(AUTO_CLOSE_MS, root.destroy)
 
     messagebox.showinfo(
-        "Claude Code",
+        hook_common.tr("plan.window_title"),
         message,
         parent=root,
     )
@@ -104,16 +92,23 @@ def main():
     # Test mode: skip dialog, exit cleanly.
     if os.environ.get("CLAUDE_HOOK_TEST") == "1":
         sys.exit(0)
-    if _gui_disabled():
+    if hook_common.gui_disabled():
         sys.exit(0)
 
-    data = _read_stdin_json()
+    data = hook_common.read_stdin_json()
     message = _build_message(data)
+
+    lock = hook_common.acquire_dialog_lock(0)
+    if lock is None:
+        sys.exit(0)
+
     try:
         show_notification(message)
     except tk.TclError:
         # No display available; never delay the plan approval prompt.
         pass
+    finally:
+        lock.release()
 
     # No decision output needed
     sys.exit(0)

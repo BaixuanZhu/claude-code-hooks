@@ -7,98 +7,53 @@ Reads JSON from stdin (UTF-8), shows Allow/Deny dialog,
 outputs JSON decision to stdout.
 """
 
-import ctypes
 import json
 import os
 import sys
 import tkinter as tk
-from tkinter import scrolledtext, ttk
+from tkinter import font as tkfont, scrolledtext, ttk
+
+_HOOKS_DIR = os.path.dirname(os.path.abspath(__file__))
+if _HOOKS_DIR not in sys.path:
+    sys.path.insert(0, _HOOKS_DIR)
+import hook_common
 
 # Ensure UTF-8 output for CJK content in the JSON decision. stdin is read via
 # sys.stdin.buffer.read() and decoded manually, so only stdout needs reconfiguring.
 sys.stdout.reconfigure(encoding="utf-8")
 
-# High-DPI awareness so dialogs aren't blurry on scaled displays.
-try:
-    ctypes.windll.shcore.SetProcessDpiAwareness(1)  # per-monitor V2 (Win 8.1+)
-except (AttributeError, OSError):
-    try:
-        ctypes.windll.user32.SetProcessDPIAware()  # legacy fallback (Vista+)
-    except (AttributeError, OSError):
-        pass
+hook_common.enable_high_dpi()
 
 MAX_WIDTH = 600
 MAX_HEIGHT = 520
 MIN_HEIGHT = 160
 
-_DEST_LABELS = {
-    "session": "\u672c\u6b21\u4f1a\u8bdd",
-    "localSettings": "\u672c\u5730\u9879\u76ee",
-    "projectSettings": "\u5171\u4eab\u9879\u76ee",
-    "userSettings": "\u5168\u5c40",
-}
+# How long a second permission dialog waits for the open one to close before
+# showing anyway. Keeps parallel tool calls from stacking windows.
+LOCK_WAIT_SECONDS = 60
 
-_MODE_LABELS = {
-    "default": "\u9ed8\u8ba4\u6a21\u5f0f",
-    "manual": "\u9ed8\u8ba4\u6a21\u5f0f",
-    "auto": "\u81ea\u52a8\u6279\u51c6",
-    "acceptEdits": "\u81ea\u52a8\u63a5\u53d7\u7f16\u8f91",
-    "dontAsk": "\u4e0d\u518d\u8be2\u95ee",
-    "bypassPermissions": "\u8df3\u8fc7\u6743\u9650\u68c0\u67e5",
-    "plan": "\u8ba1\u5212\u6a21\u5f0f",
-}
-
-_BEHAVIOR_LABELS = {
-    "allow": "\u5141\u8bb8",
-    "deny": "\u62d2\u7edd",
-    "ask": "\u8be2\u95ee",
-}
-
-_RULE_TYPE_LABELS = {
-    "replaceRules": "\u66ff\u6362\u89c4\u5219",
-    "removeRules": "\u79fb\u9664\u89c4\u5219",
-    "addDirectories": "\u6dfb\u52a0\u76ee\u5f55",
-    "removeDirectories": "\u79fb\u9664\u76ee\u5f55",
-}
-
-# Built from the tables above so every (type, behavior/mode, destination)
-# combination the API can emit resolves to a readable label.
-SUGGESTION_LABELS = {}
-for _dest, _dest_label in _DEST_LABELS.items():
-    for _behavior, _behavior_label in _BEHAVIOR_LABELS.items():
-        if _behavior == "allow":
-            _prefix = "\u5141\u8bb8" if _dest == "session" else "\u59cb\u7ec8\u5141\u8bb8"
-        elif _behavior == "deny":
-            _prefix = "\u62d2\u7edd" if _dest == "session" else "\u59cb\u7ec8\u62d2\u7edd"
-        else:
-            _prefix = "\u8be2\u95ee"
-        SUGGESTION_LABELS[("addRules", _behavior, _dest)] = f"{_prefix}\uff08{_dest_label}\uff09"
-    for _mode, _mode_label in _MODE_LABELS.items():
-        SUGGESTION_LABELS[("setMode", _mode, _dest)] = f"{_mode_label}\uff08{_dest_label}\uff09"
-    for _rule_type, _rule_label in _RULE_TYPE_LABELS.items():
-        SUGGESTION_LABELS[(_rule_type, "", _dest)] = f"{_rule_label}\uff08{_dest_label}\uff09"
+_VALID_BEHAVIORS = ("allow", "deny", "ask")
+_VALID_RULE_TYPES = ("replaceRules", "removeRules", "addDirectories", "removeDirectories")
 
 
 def _setup_style(root: tk.Tk):
     """Configure ttk styles for a modern, clean look."""
     style = ttk.Style(root)
-    # Use the most modern available theme on each platform.
-    for theme in ("vista", "winnative", "clam", "default"):
-        try:
-            style.theme_use(theme)
-            break
-        except tk.TclError:
-            continue
+    hook_common.apply_theme(style)
 
-    font_main = ("Microsoft YaHei UI", 10)
-    font_bold = ("Microsoft YaHei UI", 12, "bold")
-    font_btn = ("Microsoft YaHei UI", 10)
+    font_main = hook_common.ui_font(10)
+    font_bold = hook_common.ui_font(12, bold=True)
+    font_btn = hook_common.ui_font(10)
 
     style.configure("Title.TLabel", font=font_bold, foreground="#1a1a1a")
     style.configure("Body.TLabel", font=font_main, foreground="#333333")
     style.configure("TButton", font=font_btn, padding=(16, 8))
     style.configure("Accent.TButton", font=font_btn, padding=(16, 8))
     style.configure("Suggestion.TButton", font=font_main, padding=(12, 6))
+
+
+def _combo(name: str, dest: str) -> str:
+    return hook_common.tr("perm.suggestion.combo", name=name, dest=dest)
 
 
 def get_suggestion_label(suggestion: dict) -> str:
@@ -109,11 +64,28 @@ def get_suggestion_label(suggestion: dict) -> str:
     # Older/internal payloads may nest them under "decision"; tolerate both.
     sug_type = suggestion.get("type", "")
     dest = suggestion.get("destination") or suggestion.get("decision", {}).get("destination", "")
+    dest_label = hook_common.tr(f"perm.dest.{dest}", default="")
+    fallback = hook_common.tr("perm.suggestion.fallback")
+    if not dest_label:
+        return fallback
+
     if sug_type == "setMode":
         mode = suggestion.get("mode") or suggestion.get("decision", {}).get("mode", "")
-        return SUGGESTION_LABELS.get((sug_type, mode, dest), "\u5e94\u7528\u89c4\u5219")
+        mode_label = hook_common.tr(f"perm.mode.{mode}", default="")
+        return _combo(mode_label, dest_label) if mode_label else fallback
+
+    if sug_type in _VALID_RULE_TYPES:
+        return _combo(hook_common.tr(f"perm.rule.{sug_type}"), dest_label)
+
     behavior = suggestion.get("behavior") or suggestion.get("decision", {}).get("behavior", "")
-    return SUGGESTION_LABELS.get((sug_type, behavior, dest), "\u5e94\u7528\u89c4\u5219")
+    if behavior not in _VALID_BEHAVIORS:
+        return fallback
+    if behavior == "ask":
+        prefix = hook_common.tr("perm.prefix.ask")
+    else:
+        scope = "session" if dest == "session" else "always"
+        prefix = hook_common.tr(f"perm.prefix.{behavior}_{scope}")
+    return _combo(prefix, dest_label)
 
 
 def get_suggestion_behavior(suggestion: dict) -> str:
@@ -124,11 +96,6 @@ def get_suggestion_behavior(suggestion: dict) -> str:
         or suggestion.get("decision", {}).get("behavior", "")
         or "allow"
     )
-
-
-def _gui_disabled() -> bool:
-    """True in CI or when the user opted out; hooks then leave the normal flow alone."""
-    return os.environ.get("CLAUDE_GUI_HOOKS_DISABLE") == "1" or bool(os.environ.get("CI"))
 
 
 def shorten_path(path: str) -> str:
@@ -145,28 +112,28 @@ def build_permission_message(data: dict) -> tuple[str, str]:
 
     if tool_name in ("Bash", "PowerShell"):
         cmd = tool_input.get("command", "")
-        title = f"{tool_name} \u547d\u4ee4"
-        body = cmd if cmd else "(\u7a7a\u547d\u4ee4)"
+        title = hook_common.tr("perm.title.command", tool=tool_name)
+        body = cmd if cmd else hook_common.tr("perm.body.empty")
         if len(body) > 300:
-            body = body[:300] + "\n... (\u5df2\u622a\u65ad)"
+            body = body[:300] + hook_common.tr("perm.body.truncated")
     elif tool_name == "Edit":
-        title = "\u7f16\u8f91\u6587\u4ef6"
+        title = hook_common.tr("perm.title.edit")
         body = shorten_path(tool_input.get("file_path", "Unknown"))
     elif tool_name == "Write":
-        title = "\u5199\u5165\u6587\u4ef6"
+        title = hook_common.tr("perm.title.write")
         body = shorten_path(tool_input.get("file_path", "Unknown"))
     elif tool_name == "Read":
-        title = "\u8bfb\u53d6\u6587\u4ef6"
+        title = hook_common.tr("perm.title.read")
         body = shorten_path(tool_input.get("file_path", "Unknown"))
     else:
-        title = f"\u6743\u9650 \u2014 {tool_name}"
+        title = hook_common.tr("perm.title.generic", tool=tool_name)
         display = {}
         for k, v in list(tool_input.items())[:5]:
             s = str(v)
             display[k] = s[:80] + "..." if len(s) > 80 else s
         body = json.dumps(display, ensure_ascii=False, indent=2)
         if len(body) > 200:
-            body = body[:200] + "\n... (\u5df2\u622a\u65ad)"
+            body = body[:200] + hook_common.tr("perm.body.truncated")
 
     return title, body
 
@@ -200,7 +167,7 @@ def show_permission_dialog(title: str, body: str, suggestions: list[dict]) -> tu
     _setup_style(root)
 
     dialog = tk.Toplevel(root)
-    dialog.title("Claude Code")
+    dialog.title(hook_common.tr("perm.window_title"))
     dialog.resizable(True, False)
     dialog.attributes("-topmost", True)
 
@@ -217,7 +184,7 @@ def show_permission_dialog(title: str, body: str, suggestions: list[dict]) -> tu
     text_widget = scrolledtext.ScrolledText(
         content_frame, wrap="word", height=6,
         padx=10, pady=8, state="normal",
-        font=("Microsoft YaHei UI", 10),
+        font=hook_common.ui_font(10),
         relief="flat", highlightthickness=1,
         highlightbackground="#cccccc",
     )
@@ -243,13 +210,13 @@ def show_permission_dialog(title: str, body: str, suggestions: list[dict]) -> tu
     def on_deny():
         make_decision("deny", None)
 
-    ttk.Button(action_frame, text="\u2715  \u62d2\u7edd", command=on_deny,
+    ttk.Button(action_frame, text=hook_common.tr("perm.button.deny"), command=on_deny,
                ).pack(side="right", padx=(8, 0))
 
     def on_allow():
         make_decision("allow", None)
 
-    allow_btn = ttk.Button(action_frame, text="\u2713  \u5141\u8bb8", command=on_allow,
+    allow_btn = ttk.Button(action_frame, text=hook_common.tr("perm.button.allow"), command=on_allow,
                            style="Accent.TButton")
     allow_btn.pack(side="right")
 
@@ -268,28 +235,37 @@ def show_permission_dialog(title: str, body: str, suggestions: list[dict]) -> tu
         sug_inner = ttk.Frame(sug_frame)
         sug_inner.pack(anchor="w")
 
-        col = 0
-        max_cols = 2
+        labels = []
         for i, sug in enumerate(suggestions):
             sug_behavior = get_suggestion_behavior(sug)
             label = get_suggestion_label(sug)
             if sug_behavior == "deny":
                 # updatedPermissions is allow-only, so a deny suggestion applies
                 # to this request only. Say so instead of implying persistence.
-                label += " \u00b7 \u4ec5\u672c\u6b21"
-            idx = i + 1
+                label += hook_common.tr("perm.suggestion.deny_note")
+            labels.append((f"{i + 1}. {label}", sug_behavior, sug))
 
+        # Fit buttons to their text instead of a fixed character width (English
+        # labels are longer than Chinese ones). Drop to one column when two
+        # would not fit, so nothing gets clipped.
+        label_px = max(
+            tkfont.Font(font=hook_common.ui_font(10)).measure(text)
+            for text, _, _ in labels
+        ) + 28
+        max_cols = 2 if label_px * 2 + 8 <= MAX_WIDTH - 40 else 1
+
+        for col, (text, sug_behavior, sug) in enumerate(labels):
             def on_suggestion(s=sug, b=sug_behavior):
                 make_decision(b, s)
 
             ttk.Button(
-                sug_inner, text=f"{idx}. {label}", command=on_suggestion,
-                style="Suggestion.TButton", width=20,
-            ).grid(row=col // max_cols, column=col % max_cols, padx=(0, 8), pady=(0, 4), sticky="w")
-            col += 1
+                sug_inner, text=text, command=on_suggestion,
+                style="Suggestion.TButton",
+            ).grid(row=col // max_cols, column=col % max_cols,
+                   padx=(0, 8), pady=(0, 4), sticky="w")
 
-            if idx <= 9:
-                dialog.bind(str(idx), lambda e, fn=on_suggestion: fn())
+            if col + 1 <= 9:
+                dialog.bind(str(col + 1), lambda e, fn=on_suggestion: fn())
 
     _center_dialog(dialog)
     dialog.wait_window()
@@ -309,7 +285,7 @@ def main():
         }, ensure_ascii=False))
         sys.exit(0)
 
-    if _gui_disabled():
+    if hook_common.gui_disabled():
         # Leave the request to Claude Code's normal permission flow.
         sys.exit(0)
 
@@ -331,7 +307,12 @@ def main():
         if get_suggestion_behavior(s) in ("allow", "deny")
     ]
     try:
-        behavior, selected_suggestion = show_permission_dialog(title, body, suggestions)
+        lock = hook_common.acquire_dialog_lock(LOCK_WAIT_SECONDS)
+        try:
+            behavior, selected_suggestion = show_permission_dialog(title, body, suggestions)
+        finally:
+            if lock is not None:
+                lock.release()
     except tk.TclError:
         # No display (headless Linux, SSH, CI): leave the flow unchanged.
         sys.exit(0)

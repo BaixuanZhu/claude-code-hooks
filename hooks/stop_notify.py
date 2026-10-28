@@ -11,37 +11,21 @@ they never delay Claude.
 No JSON output: notification-only hooks cannot control the turn.
 """
 
-import ctypes
-import json
 import os
 import re
 import sys
 import tkinter as tk
 from tkinter import messagebox
 
+_HOOKS_DIR = os.path.dirname(os.path.abspath(__file__))
+if _HOOKS_DIR not in sys.path:
+    sys.path.insert(0, _HOOKS_DIR)
+import hook_common
+
+hook_common.enable_high_dpi()
+
 AUTO_CLOSE_MS = 8000   # auto-close after 8 seconds
 MAX_PREVIEW = 120      # cap the in-dialog preview length
-
-# High-DPI awareness so dialogs aren't blurry on scaled displays.
-try:
-    ctypes.windll.shcore.SetProcessDpiAwareness(1)  # per-monitor V2 (Win 8.1+)
-except (AttributeError, OSError):
-    try:
-        ctypes.windll.user32.SetProcessDPIAware()  # legacy fallback (Vista+)
-    except (AttributeError, OSError):
-        pass
-
-
-def _read_stdin_json() -> dict:
-    """Best-effort UTF-8 JSON read from stdin. Returns {} on any failure."""
-    try:
-        raw = sys.stdin.buffer.read()
-        if not raw:
-            return {}
-        data = json.loads(raw.decode("utf-8"))
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
 
 
 def _truncate(text: str, max_len: int = MAX_PREVIEW) -> str:
@@ -52,11 +36,6 @@ def _truncate(text: str, max_len: int = MAX_PREVIEW) -> str:
     return text
 
 
-def _gui_disabled() -> bool:
-    """True in CI or when the user opted out."""
-    return os.environ.get("CLAUDE_GUI_HOOKS_DISABLE") == "1" or bool(os.environ.get("CI"))
-
-
 def _build_message(data: dict) -> tuple[str, str]:
     """Return (title, body) for the event in the hook payload."""
     event = data.get("hook_event_name") or "Stop"
@@ -64,28 +43,36 @@ def _build_message(data: dict) -> tuple[str, str]:
     if event == "StopFailure":
         error = data.get("error") or "unknown"
         details = _truncate((data.get("error_details") or "").strip(), 200)
-        body = f"The turn ended due to an API error: {error}."
+        body = hook_common.tr("stop.failure_body", error=error)
         if details:
             body += f"\n\n{details}"
-        return "Claude Code - API Error", body
+        return hook_common.tr("stop.failure_title"), body
 
     tasks = data.get("background_tasks") or []
     crons = data.get("session_crons") or []
     if tasks or crons:
         parts = []
         if tasks:
-            parts.append(f"{len(tasks)} background task" + ("" if len(tasks) == 1 else "s"))
+            key = "stop.task" if len(tasks) == 1 else "stop.tasks"
+            parts.append(hook_common.tr(key, n=len(tasks)))
         if crons:
-            parts.append(f"{len(crons)} scheduled wakeup" + ("" if len(crons) == 1 else "s"))
-        return (
-            "Claude Code - Waiting",
-            "Claude is paused while " + " and ".join(parts) + " are still running.",
+            key = "stop.cron" if len(crons) == 1 else "stop.crons"
+            parts.append(hook_common.tr(key, n=len(crons)))
+        joined = (
+            hook_common.tr("stop.join", a=parts[0], b=parts[1])
+            if len(parts) == 2 else parts[0]
         )
+        body_key = (
+            "stop.waiting_body_single"
+            if len(tasks) + len(crons) == 1
+            else "stop.waiting_body_many"
+        )
+        return hook_common.tr("stop.waiting_title"), hook_common.tr(body_key, parts=joined)
 
     msg = (data.get("last_assistant_message") or "").strip()
     if not msg:
-        return "Claude Code - Done", "Claude finished. Waiting for your input."
-    return "Claude Code - Done", _truncate(msg)
+        return hook_common.tr("stop.done_title"), hook_common.tr("stop.done_body")
+    return hook_common.tr("stop.done_title"), _truncate(msg)
 
 
 def show_notification(title: str, message: str):
@@ -108,16 +95,25 @@ def show_notification(title: str, message: str):
 def main():
     if os.environ.get("CLAUDE_HOOK_TEST") == "1":
         sys.exit(0)
-    if _gui_disabled():
+    if hook_common.gui_disabled():
         sys.exit(0)
 
-    data = _read_stdin_json()
+    data = hook_common.read_stdin_json()
     title, message = _build_message(data)
+
+    # Notifications never queue: if a permission/question dialog is open, a
+    # stale notification popping on top of it helps nobody.
+    lock = hook_common.acquire_dialog_lock(0)
+    if lock is None:
+        sys.exit(0)
+
     try:
         show_notification(title, message)
     except tk.TclError:
         # No display available; a notification is never worth failing the turn.
         pass
+    finally:
+        lock.release()
     sys.exit(0)
 
 

@@ -50,13 +50,16 @@ Fetch each file and save to `~/.claude/hooks/scripts/`:
 | `stop_notify.py` | `https://raw.githubusercontent.com/BaixuanZhu/claude-code-hooks/main/hooks/stop_notify.py` |
 | `exit_plan_mode_notify.py` | `https://raw.githubusercontent.com/BaixuanZhu/claude-code-hooks/main/hooks/exit_plan_mode_notify.py` |
 | `notification_notify.py` | `https://raw.githubusercontent.com/BaixuanZhu/claude-code-hooks/main/hooks/notification_notify.py` |
+| `hook_common.py` | `https://raw.githubusercontent.com/BaixuanZhu/claude-code-hooks/main/hooks/hook_common.py` |
+
+`hook_common.py` is a shared module imported by the five hook scripts (language, fonts, dialog lock). All six files must sit in the same directory.
 
 ### Fallback: git clone
 
 If `raw.githubusercontent.com` is unreachable:
 
 1. `git clone https://github.com/BaixuanZhu/claude-code-hooks.git` into a temp directory
-2. Copy `hooks/*.py` (5 files) to `~/.claude/hooks/scripts/`
+2. Copy `hooks/*.py` (6 files) to `~/.claude/hooks/scripts/`
 3. Delete the temp directory
 
 ### Step 3: Configure settings.json
@@ -73,7 +76,7 @@ Exec form (`command` + `args`, no shell) is deliberate: it avoids quoting proble
 Merge rules:
 
 - If the file does not exist or has no `"hooks"` key → write the full config below
-- If `"hooks"` exists → for each event, remove only entries whose `command` or `args` reference one of the five script filenames, then append the entries below
+- If `"hooks"` exists → for each event, remove only entries whose `command` or `args` reference one of the five hook script filenames, then append the entries below
 - Never delete unrelated hook entries
 
 Target config to merge:
@@ -162,7 +165,7 @@ Target config to merge:
 
 ### Step 4: Verify
 
-1. All 5 `.py` files exist and are non-empty in `~/.claude/hooks/scripts/`
+1. All 6 `.py` files exist and are non-empty in `~/.claude/hooks/scripts/`
 2. `~/.claude/settings.json` is valid JSON
 3. `hooks.PermissionRequest`, `hooks.PreToolUse`, `hooks.Stop`, `hooks.StopFailure`, `hooks.Notification` are all present
 
@@ -172,5 +175,6 @@ Tell the user:
 - Which files were fetched
 - Whether settings.json was created or merged
 - That dialogs are skipped in CI or when `CLAUDE_GUI_HOOKS_DISABLE=1` is set
+- That the UI language follows the system locale (Chinese or English); `CLAUDE_GUI_HOOKS_LANG=zh` / `=en` overrides it
 - Any warnings (e.g. tkinter unavailable, fetch failed and fell back to git clone)
 - **Restart Claude Code session** for hooks to take effect
