@@ -54,6 +54,11 @@ def _truncate(text: str, max_len: int = MAX_PREVIEW) -> str:
     return text
 
 
+def _gui_disabled() -> bool:
+    """True in CI or when the user opted out."""
+    return os.environ.get("CLAUDE_GUI_HOOKS_DISABLE") == "1" or bool(os.environ.get("CI"))
+
+
 def _build_message(data: dict) -> str:
     """Build the dialog body, including a short plan preview when available."""
     plan = ""
@@ -99,10 +104,16 @@ def main():
     # Test mode: skip dialog, exit cleanly.
     if os.environ.get("CLAUDE_HOOK_TEST") == "1":
         sys.exit(0)
+    if _gui_disabled():
+        sys.exit(0)
 
     data = _read_stdin_json()
     message = _build_message(data)
-    show_notification(message)
+    try:
+        show_notification(message)
+    except tk.TclError:
+        # No display available; never delay the plan approval prompt.
+        pass
 
     # No decision output needed
     sys.exit(0)

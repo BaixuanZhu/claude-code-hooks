@@ -8,9 +8,10 @@
   },
   "plugins": [
     {
-      "name": "claude-code-hooks",
+      "name": "desktop-dialogs",
+      "displayName": "Claude Code Notify",
       "source": "./",
-      "description": "Native GUI dialogs for Claude Code permission requests, question prompts, and task notifications. Cross-platform (Windows/macOS/Linux) with zero dependencies beyond Python + tkinter.",
+      "description": "Native GUI dialogs for Claude Code permission requests, question prompts, task notifications, and API failures. Cross-platform (Windows/macOS/Linux) with zero dependencies beyond Python + tkinter.",
       "homepage": "https://github.com/BaixuanZhu/claude-code-hooks",
       "category": "productivity",
       "keywords": ["hooks", "gui", "permission", "notification", "dialog", "tkinter", "cross-platform"]

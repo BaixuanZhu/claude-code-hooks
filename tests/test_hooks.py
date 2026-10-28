@@ -28,15 +28,22 @@ HOOKS_DIR = REPO_ROOT / "hooks"
 PYTHON = sys.executable  # use the interpreter running pytest (so venv works)
 
 
-def _run_hook(script_name: str, event: dict, timeout: int = 10):
+def _run_hook(script_name: str, event: dict, timeout: int = 10,
+              extra_env: dict | None = None, test_mode: bool = True):
     """Run a hook script with a fake JSON event on stdin."""
     script_path = HOOKS_DIR / script_name
     assert script_path.is_file(), f"Missing script: {script_path}"
 
     env = os.environ.copy()
-    env["CLAUDE_HOOK_TEST"] = "1"
+    env.pop("CI", None)  # keep ambient CI from short-circuiting GUI hooks
+    if test_mode:
+        env["CLAUDE_HOOK_TEST"] = "1"
+    else:
+        env.pop("CLAUDE_HOOK_TEST", None)
     # PYTHONIOENCODING guards against CJK titles printing as ? on some configs.
     env.setdefault("PYTHONIOENCODING", "utf-8")
+    if extra_env:
+        env.update(extra_env)
 
     return subprocess.run(
         [PYTHON, str(script_path)],
@@ -95,9 +102,8 @@ def test_stop_notify_smoke():
     event = {"last_assistant_message": "Task completed successfully."}
     result = _run_hook("stop_notify.py", event)
     assert result.returncode == 0, f"stderr: {result.stderr.decode('utf-8', 'replace')}"
-    payload = json.loads(result.stdout.decode("utf-8"))
-    # Stop hook must at least emit a continue:true so plugins don't choke
-    assert payload.get("continue") is True
+    # Notification-only and async: the hook must stay silent on stdout.
+    assert result.stdout.strip() == b""
 
 
 def test_exit_plan_mode_notify_smoke():
@@ -147,6 +153,26 @@ def _import_ask_module():
     import importlib.util
     spec = importlib.util.spec_from_file_location(
         "ask_user_question", HOOKS_DIR / "ask_user_question.py"
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _import_stop_module():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "stop_notify", HOOKS_DIR / "stop_notify.py"
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _import_notification_module():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "notification_notify", HOOKS_DIR / "notification_notify.py"
     )
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -203,7 +229,7 @@ def test_get_suggestion_label_top_level_fields():
     """Labels resolve from top-level behavior/destination fields (official schema)."""
     perm = _import_permission_module()
     sug = {"type": "addRules", "behavior": "allow", "destination": "localSettings"}
-    assert perm.get_suggestion_label(sug) == "始终允许（项目）"
+    assert perm.get_suggestion_label(sug) == "始终允许（本地项目）"
 
 
 def test_get_suggestion_label_nested_decision():
@@ -288,7 +314,7 @@ def test_build_permission_message_unknown_tool():
 
 def test_shorten_path_short():
     perm = _import_permission_module()
-    assert perm.shorten_path("src/app.py") == "src\\app.py"
+    assert perm.shorten_path("src/app.py") == os.path.join("src", "app.py")
 
 
 def test_shorten_path_long():
@@ -406,7 +432,7 @@ def test_ask_user_question_multi_select_test_mode():
     assert result.returncode == 0
     payload = json.loads(result.stdout.decode("utf-8"))
     answers = payload["hookSpecificOutput"]["updatedInput"]["answers"]
-    assert answers["Pick features"] == "Dark mode"
+    assert answers["Pick features"] == ["Dark mode"]
 
 
 def test_ask_user_question_free_text_option_test_mode():
@@ -457,7 +483,7 @@ def test_ask_user_question_two_questions_test_mode():
     payload = json.loads(result.stdout.decode("utf-8"))
     answers = payload["hookSpecificOutput"]["updatedInput"]["answers"]
     assert answers["Q1"] == "A"
-    assert answers["Q2"] == "X"
+    assert answers["Q2"] == ["X"]
     # Questions echoed back
     assert len(payload["hookSpecificOutput"]["updatedInput"]["questions"]) == 2
 
@@ -485,3 +511,125 @@ def test_permission_request_empty_tool_input():
     }
     result = _run_hook("permission_request.py", event)
     assert result.returncode == 0
+
+
+# --- Suggestion schema coverage ---
+
+def test_get_suggestion_label_setmode_uses_mode_field():
+    perm = _import_permission_module()
+    assert perm.get_suggestion_label(
+        {"type": "setMode", "mode": "auto", "destination": "session"}
+    ) == "自动批准（本次会话）"
+    assert perm.get_suggestion_label(
+        {"type": "setMode", "mode": "acceptEdits", "destination": "projectSettings"}
+    ) == "自动接受编辑（共享项目）"
+
+
+def test_suggestion_labels_project_settings_and_new_types():
+    perm = _import_permission_module()
+    assert "共享项目" in perm.SUGGESTION_LABELS[("addRules", "allow", "projectSettings")]
+    for entry_type in ("replaceRules", "removeRules", "addDirectories", "removeDirectories"):
+        assert (entry_type, "", "session") in perm.SUGGESTION_LABELS
+
+
+def test_get_suggestion_behavior():
+    perm = _import_permission_module()
+    assert perm.get_suggestion_behavior({"type": "addRules", "behavior": "ask"}) == "ask"
+    assert perm.get_suggestion_behavior({"type": "setMode", "mode": "auto"}) == "allow"
+    assert perm.get_suggestion_behavior(
+        {"type": "addRules", "decision": {"behavior": "deny"}}
+    ) == "deny"
+
+
+# --- Headless / opt-out guards ---
+
+def test_permission_request_headless_exits_silently():
+    event = {"tool_name": "Bash", "tool_input": {"command": "echo hi"}}
+    result = _run_hook("permission_request.py", event, test_mode=False,
+                       extra_env={"CI": "1"})
+    assert result.returncode == 0
+    assert result.stdout.strip() == b""
+
+
+def test_ask_user_question_headless_exits_silently():
+    event = {
+        "tool_name": "AskUserQuestion",
+        "tool_input": {"questions": [{"question": "Q", "options": []}]},
+    }
+    result = _run_hook("ask_user_question.py", event, test_mode=False,
+                       extra_env={"CI": "1"})
+    assert result.returncode == 0
+    assert result.stdout.strip() == b""
+
+
+def test_permission_request_opt_out_env():
+    event = {"tool_name": "Bash", "tool_input": {"command": "echo hi"}}
+    result = _run_hook(
+        "permission_request.py", event, test_mode=False,
+        extra_env={"CLAUDE_GUI_HOOKS_DISABLE": "1"},
+    )
+    assert result.returncode == 0
+    assert result.stdout.strip() == b""
+
+
+# --- Stop / StopFailure ---
+
+def test_stop_failure_smoke():
+    event = {"hook_event_name": "StopFailure", "error": "rate_limit"}
+    result = _run_hook("stop_notify.py", event)
+    assert result.returncode == 0
+    assert result.stdout.strip() == b""
+
+
+def test_stop_failure_message():
+    stop = _import_stop_module()
+    title, body = stop._build_message({
+        "hook_event_name": "StopFailure",
+        "error": "rate_limit",
+        "error_details": "429 Too Many Requests",
+    })
+    assert "rate_limit" in body
+    assert "429" in body
+    assert "Error" in title
+
+
+def test_stop_background_tasks_message():
+    stop = _import_stop_module()
+    title, body = stop._build_message({
+        "hook_event_name": "Stop",
+        "background_tasks": [{"id": "t1", "type": "shell"}],
+        "session_crons": [{"id": "c1", "schedule": "0 9 * * *"}],
+    })
+    assert "background task" in body
+    assert "scheduled wakeup" in body
+    assert "Waiting" in title
+
+
+def test_stop_plain_message():
+    stop = _import_stop_module()
+    _, body = stop._build_message({"last_assistant_message": "All done."})
+    assert body == "All done."
+
+
+# --- Notification ---
+
+def test_notification_smoke():
+    event = {"notification_type": "agent_completed", "message": "Agent finished."}
+    result = _run_hook("notification_notify.py", event)
+    assert result.returncode == 0
+    assert result.stdout.strip() == b""
+
+
+def test_notification_build_message():
+    notif = _import_notification_module()
+    title, body = notif._build_message({
+        "notification_type": "agent_needs_input",
+        "message": "Pick a file",
+    })
+    assert "Needs Input" in title
+    assert body == "Pick a file"
+
+
+def test_notification_ignores_unhandled_type():
+    notif = _import_notification_module()
+    assert notif._build_message({"notification_type": "idle_prompt"}) is None

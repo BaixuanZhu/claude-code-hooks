@@ -145,18 +145,23 @@ def _collect_answers(question_vars: list[dict]) -> dict:
         selected_indices = [i for i, v in enumerate(vars_) if v.get()]
 
         if multi:
-            if selected_indices:
-                answers[qv["question"]] = ", ".join(
-                    _resolve_value(i) for i in selected_indices
-                )
-            else:
-                answers[qv["question"]] = ""
+            # Multi-select answers are label arrays (accepted since 2.1.136);
+            # arrays avoid ambiguity when a label itself contains a comma.
+            values = [_resolve_value(i) for i in selected_indices]
+            if not values and options:
+                values = [options[0].get("label", "")]
+            answers[qv["question"]] = values
         else:
             if selected_indices:
                 answers[qv["question"]] = _resolve_value(selected_indices[0])
             else:
                 answers[qv["question"]] = options[0].get("label", "") if options else ""
     return answers
+
+
+def _gui_disabled() -> bool:
+    """True in CI or when the user opted out; hooks then leave the normal flow alone."""
+    return os.environ.get("CLAUDE_GUI_HOOKS_DISABLE") == "1" or bool(os.environ.get("CI"))
 
 
 def _deny(reason: str):
@@ -422,7 +427,11 @@ def main():
             data = {}
         tool_input = data.get("tool_input", {}) if isinstance(data, dict) else {}
         questions = tool_input.get("questions", [])
-        answers = {q.get("question", ""): (q.get("options", [{}])[0].get("label", "") if q.get("options") else "") for q in questions}
+        answers = {}
+        for q in questions:
+            options = q.get("options", [])
+            default = options[0].get("label", "") if options else ""
+            answers[q.get("question", "")] = [default] if q.get("multiSelect") else default
         print(json.dumps({
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
@@ -444,13 +453,21 @@ def main():
     if not isinstance(data, dict):
         _deny("Invalid hook input")
 
+    if _gui_disabled():
+        # Leave the request to Claude Code's normal AskUserQuestion flow.
+        sys.exit(0)
+
     tool_input = data.get("tool_input", {})
     questions = tool_input.get("questions", [])
 
     if not questions:
         _deny("No questions found in input")
 
-    answers = show_question_dialog(questions)
+    try:
+        answers = show_question_dialog(questions)
+    except tk.TclError:
+        # No display (headless Linux, SSH, CI): leave the flow unchanged.
+        sys.exit(0)
 
     if answers is None:
         _deny("User cancelled the question dialog")

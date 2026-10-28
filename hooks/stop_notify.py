@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Claude Code Stop hook.
+Claude Code Stop / StopFailure hook.
 
-When Claude finishes responding and waits for user input, pops up a
-topmost tkinter message box so you notice it's done. No JSON output,
-no terminal escape sequences, no third-party dependencies.
+Stop fires when Claude finishes a turn; StopFailure fires instead when the turn
+ends due to an API error (rate limit, auth failure, ...). Both pop a topmost
+tkinter message box so the end of a turn is noticeable, and both run async so
+they never delay Claude.
 
-Reads JSON from stdin (UTF-8) only to grab a short preview of the
-last assistant message for the dialog body. Falls back to a generic
-"Task completed" message when there's nothing to show.
+No JSON output: notification-only hooks cannot control the turn.
 """
 
 import ctypes
@@ -45,20 +44,51 @@ def _read_stdin_json() -> dict:
         return {}
 
 
-def _build_message(data: dict) -> str:
-    """Build the dialog body. Shows a short preview of the last reply if any."""
+def _truncate(text: str, max_len: int = MAX_PREVIEW) -> str:
+    """Collapse whitespace and cap at max_len with an ellipsis."""
+    text = re.sub(r"\s+", " ", text)
+    if len(text) > max_len:
+        text = text[:max_len].rstrip() + "\u2026"
+    return text
+
+
+def _gui_disabled() -> bool:
+    """True in CI or when the user opted out."""
+    return os.environ.get("CLAUDE_GUI_HOOKS_DISABLE") == "1" or bool(os.environ.get("CI"))
+
+
+def _build_message(data: dict) -> tuple[str, str]:
+    """Return (title, body) for the event in the hook payload."""
+    event = data.get("hook_event_name") or "Stop"
+
+    if event == "StopFailure":
+        error = data.get("error") or "unknown"
+        details = _truncate((data.get("error_details") or "").strip(), 200)
+        body = f"The turn ended due to an API error: {error}."
+        if details:
+            body += f"\n\n{details}"
+        return "Claude Code - API Error", body
+
+    tasks = data.get("background_tasks") or []
+    crons = data.get("session_crons") or []
+    if tasks or crons:
+        parts = []
+        if tasks:
+            parts.append(f"{len(tasks)} background task" + ("" if len(tasks) == 1 else "s"))
+        if crons:
+            parts.append(f"{len(crons)} scheduled wakeup" + ("" if len(crons) == 1 else "s"))
+        return (
+            "Claude Code - Waiting",
+            "Claude is paused while " + " and ".join(parts) + " are still running.",
+        )
+
     msg = (data.get("last_assistant_message") or "").strip()
     if not msg:
-        return "Claude finished. Waiting for your input."
-
-    # Collapse whitespace/newlines so the preview fits on one clean line.
-    msg = re.sub(r"\s+", " ", msg)
-    if len(msg) > MAX_PREVIEW:
-        msg = msg[:MAX_PREVIEW].rstrip() + "..."
-    return msg
+        return "Claude Code - Done", "Claude finished. Waiting for your input."
+    return "Claude Code - Done", _truncate(msg)
 
 
-def show_notification(message: str):
+def show_notification(title: str, message: str):
     root = tk.Tk()
     root.withdraw()  # hide root window
     root.attributes("-topmost", True)
@@ -72,23 +102,23 @@ def show_notification(message: str):
     # which cleans up the process — no explicit destroy needed.
     root.after(AUTO_CLOSE_MS, root.destroy)
 
-    messagebox.showinfo("Claude Code - Done", message, parent=root)
+    messagebox.showinfo(title, message, parent=root)
 
 
 def main():
-    # Test mode: skip dialog, emit continue=true and exit.
     if os.environ.get("CLAUDE_HOOK_TEST") == "1":
-        print(json.dumps({"continue": True}))
+        sys.exit(0)
+    if _gui_disabled():
         sys.exit(0)
 
     data = _read_stdin_json()
-    message = _build_message(data)
-    show_notification(message)
-
-    # Some plugin systems require valid JSON on stdout even when the
-    # native Stop hook spec allows empty output. Emit a minimal
-    # "continue": true so plugins don't choke.
-    print(json.dumps({"continue": True}))
+    title, message = _build_message(data)
+    try:
+        show_notification(title, message)
+    except tk.TclError:
+        # No display available; a notification is never worth failing the turn.
+        pass
+    sys.exit(0)
 
 
 if __name__ == "__main__":

@@ -31,17 +31,52 @@ MAX_WIDTH = 600
 MAX_HEIGHT = 520
 MIN_HEIGHT = 160
 
-SUGGESTION_LABELS = {
-    ("addRules", "allow", "session"):       "\u5141\u8bb8\uff08\u672c\u6b21\u4f1a\u8bdd\uff09",
-    ("addRules", "allow", "localSettings"): "\u59cb\u7ec8\u5141\u8bb8\uff08\u9879\u76ee\uff09",
-    ("addRules", "allow", "userSettings"):  "\u59cb\u7ec8\u5141\u8bb8\uff08\u5168\u5c40\uff09",
-    ("addRules", "deny", "session"):        "\u62d2\u7edd\uff08\u672c\u6b21\u4f1a\u8bdd\uff09",
-    ("addRules", "deny", "localSettings"):  "\u59cb\u7ec8\u62d2\u7edd\uff08\u9879\u76ee\uff09",
-    ("addRules", "deny", "userSettings"):   "\u59cb\u7ec8\u62d2\u7edd\uff08\u5168\u5c40\uff09",
-    ("setMode", "auto", "session"):         "\u81ea\u52a8\u6279\u51c6\uff08\u672c\u6b21\u4f1a\u8bdd\uff09",
-    ("setMode", "auto", "localSettings"):   "\u81ea\u52a8\u6279\u51c6\uff08\u9879\u76ee\uff09",
-    ("setMode", "plan", "session"):         "\u8ba1\u5212\u6a21\u5f0f\uff08\u672c\u6b21\u4f1a\u8bdd\uff09",
+_DEST_LABELS = {
+    "session": "\u672c\u6b21\u4f1a\u8bdd",
+    "localSettings": "\u672c\u5730\u9879\u76ee",
+    "projectSettings": "\u5171\u4eab\u9879\u76ee",
+    "userSettings": "\u5168\u5c40",
 }
+
+_MODE_LABELS = {
+    "default": "\u9ed8\u8ba4\u6a21\u5f0f",
+    "manual": "\u9ed8\u8ba4\u6a21\u5f0f",
+    "auto": "\u81ea\u52a8\u6279\u51c6",
+    "acceptEdits": "\u81ea\u52a8\u63a5\u53d7\u7f16\u8f91",
+    "dontAsk": "\u4e0d\u518d\u8be2\u95ee",
+    "bypassPermissions": "\u8df3\u8fc7\u6743\u9650\u68c0\u67e5",
+    "plan": "\u8ba1\u5212\u6a21\u5f0f",
+}
+
+_BEHAVIOR_LABELS = {
+    "allow": "\u5141\u8bb8",
+    "deny": "\u62d2\u7edd",
+    "ask": "\u8be2\u95ee",
+}
+
+_RULE_TYPE_LABELS = {
+    "replaceRules": "\u66ff\u6362\u89c4\u5219",
+    "removeRules": "\u79fb\u9664\u89c4\u5219",
+    "addDirectories": "\u6dfb\u52a0\u76ee\u5f55",
+    "removeDirectories": "\u79fb\u9664\u76ee\u5f55",
+}
+
+# Built from the tables above so every (type, behavior/mode, destination)
+# combination the API can emit resolves to a readable label.
+SUGGESTION_LABELS = {}
+for _dest, _dest_label in _DEST_LABELS.items():
+    for _behavior, _behavior_label in _BEHAVIOR_LABELS.items():
+        if _behavior == "allow":
+            _prefix = "\u5141\u8bb8" if _dest == "session" else "\u59cb\u7ec8\u5141\u8bb8"
+        elif _behavior == "deny":
+            _prefix = "\u62d2\u7edd" if _dest == "session" else "\u59cb\u7ec8\u62d2\u7edd"
+        else:
+            _prefix = "\u8be2\u95ee"
+        SUGGESTION_LABELS[("addRules", _behavior, _dest)] = f"{_prefix}\uff08{_dest_label}\uff09"
+    for _mode, _mode_label in _MODE_LABELS.items():
+        SUGGESTION_LABELS[("setMode", _mode, _dest)] = f"{_mode_label}\uff08{_dest_label}\uff09"
+    for _rule_type, _rule_label in _RULE_TYPE_LABELS.items():
+        SUGGESTION_LABELS[(_rule_type, "", _dest)] = f"{_rule_label}\uff08{_dest_label}\uff09"
 
 
 def _setup_style(root: tk.Tk):
@@ -70,18 +105,37 @@ def get_suggestion_label(suggestion: dict) -> str:
     # Official PermissionRequest input schema puts behavior/destination at the
     # TOP LEVEL of each permission_suggestions entry:
     #   {"type": "addRules", "rules": [...], "behavior": "allow", "destination": "session"}
+    # setMode entries carry "mode" instead of "behavior".
     # Older/internal payloads may nest them under "decision"; tolerate both.
-    behavior = suggestion.get("behavior") or suggestion.get("decision", {}).get("behavior", "")
-    dest = suggestion.get("destination") or suggestion.get("decision", {}).get("destination", "")
     sug_type = suggestion.get("type", "")
+    dest = suggestion.get("destination") or suggestion.get("decision", {}).get("destination", "")
+    if sug_type == "setMode":
+        mode = suggestion.get("mode") or suggestion.get("decision", {}).get("mode", "")
+        return SUGGESTION_LABELS.get((sug_type, mode, dest), "\u5e94\u7528\u89c4\u5219")
+    behavior = suggestion.get("behavior") or suggestion.get("decision", {}).get("behavior", "")
     return SUGGESTION_LABELS.get((sug_type, behavior, dest), "\u5e94\u7528\u89c4\u5219")
 
 
+def get_suggestion_behavior(suggestion: dict) -> str:
+    if suggestion.get("type") == "setMode":
+        return "allow"
+    return (
+        suggestion.get("behavior")
+        or suggestion.get("decision", {}).get("behavior", "")
+        or "allow"
+    )
+
+
+def _gui_disabled() -> bool:
+    """True in CI or when the user opted out; hooks then leave the normal flow alone."""
+    return os.environ.get("CLAUDE_GUI_HOOKS_DISABLE") == "1" or bool(os.environ.get("CI"))
+
+
 def shorten_path(path: str) -> str:
-    path = path.replace("/", "\\")
-    parts = path.rstrip("\\").rsplit("\\", 1)
+    path = path.replace("\\", os.sep).replace("/", os.sep)
+    parts = path.rstrip(os.sep).rsplit(os.sep, 1)
     if len(parts) == 2:
-        return f"...\\{parts[1]}" if len(parts[0]) > 30 else path
+        return f"...{os.sep}{parts[1]}" if len(parts[0]) > 30 else path
     return path
 
 
@@ -89,9 +143,9 @@ def build_permission_message(data: dict) -> tuple[str, str]:
     tool_name = data.get("tool_name", "Unknown")
     tool_input = data.get("tool_input", {})
 
-    if tool_name == "Bash":
+    if tool_name in ("Bash", "PowerShell"):
         cmd = tool_input.get("command", "")
-        title = "Bash \u547d\u4ee4"
+        title = f"{tool_name} \u547d\u4ee4"
         body = cmd if cmd else "(\u7a7a\u547d\u4ee4)"
         if len(body) > 300:
             body = body[:300] + "\n... (\u5df2\u622a\u65ad)"
@@ -217,14 +271,12 @@ def show_permission_dialog(title: str, body: str, suggestions: list[dict]) -> tu
         col = 0
         max_cols = 2
         for i, sug in enumerate(suggestions):
+            sug_behavior = get_suggestion_behavior(sug)
             label = get_suggestion_label(sug)
-            # Read behavior from the top level (see get_suggestion_label) so a
-            # "Deny for Session" suggestion actually denies instead of silently allow.
-            sug_behavior = (
-                sug.get("behavior")
-                or sug.get("decision", {}).get("behavior", "")
-                or "allow"
-            )
+            if sug_behavior == "deny":
+                # updatedPermissions is allow-only, so a deny suggestion applies
+                # to this request only. Say so instead of implying persistence.
+                label += " \u00b7 \u4ec5\u672c\u6b21"
             idx = i + 1
 
             def on_suggestion(s=sug, b=sug_behavior):
@@ -257,6 +309,10 @@ def main():
         }, ensure_ascii=False))
         sys.exit(0)
 
+    if _gui_disabled():
+        # Leave the request to Claude Code's normal permission flow.
+        sys.exit(0)
+
     try:
         raw = sys.stdin.buffer.read()
         data = json.loads(raw.decode("utf-8"))
@@ -267,8 +323,18 @@ def main():
         _deny("Invalid hook input")
 
     title, body = build_permission_message(data)
-    suggestions = data.get("permission_suggestions", [])
-    behavior, selected_suggestion = show_permission_dialog(title, body, suggestions)
+    raw_suggestions = data.get("permission_suggestions", [])
+    # "ask" suggestions cannot be expressed as an allow/deny decision, so they
+    # are dropped rather than being silently treated as allow.
+    suggestions = [
+        s for s in raw_suggestions
+        if get_suggestion_behavior(s) in ("allow", "deny")
+    ]
+    try:
+        behavior, selected_suggestion = show_permission_dialog(title, body, suggestions)
+    except tk.TclError:
+        # No display (headless Linux, SSH, CI): leave the flow unchanged.
+        sys.exit(0)
 
     if behavior == "allow" and selected_suggestion:
         output = {

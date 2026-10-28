@@ -1,10 +1,13 @@
-# install.ps1 - Claude Code Hooks installer (cross-platform)
+# install.ps1 - Claude Code Notify installer (Windows)
 # Usage:
 #   iwr https://raw.githubusercontent.com/BaixuanZhu/claude-code-hooks/main/install.ps1 -UseBasicParsing | iex
 #
 # Idempotent: safe to re-run. Overwrites .py files and merges into settings.json.
-# Note: For Claude Code v2.1+, plugin install is recommended over this script:
+# Uses exec form (command + args) so no shell is involved: this avoids the
+# PowerShell 5.1 problem where `||` is a parse error.
+# Note: For Claude Code v2.1+ plugin install is recommended over this script:
 #   claude plugin marketplace add BaixuanZhu/claude-code-hooks
+#   claude plugin install desktop-dialogs@claude-code-hooks
 
 $ErrorActionPreference = "Stop"
 
@@ -18,7 +21,8 @@ $Scripts   = @(
     "permission_request.py",
     "ask_user_question.py",
     "stop_notify.py",
-    "exit_plan_mode_notify.py"
+    "exit_plan_mode_notify.py",
+    "notification_notify.py"
 )
 
 function Write-Step($msg)  { Write-Host "`n== $msg ==" -ForegroundColor Cyan }
@@ -72,84 +76,82 @@ if (Test-Path $SettingsPath) {
 }
 else {
     $settings = [PSCustomObject]@{}
-    Write-Ok "No existing settings.json — will create new"
+    Write-Ok "No existing settings.json - will create new"
 }
 
-# Ensure 'hooks' is a hashtable-like object (PSCustomObject)
+# Ensure 'hooks' is an object
 if (-not ($settings.PSObject.Properties.Name -contains 'hooks') -or $null -eq $settings.hooks) {
     $settings | Add-Member -NotePropertyName 'hooks' -NotePropertyValue ([PSCustomObject]@{}) -Force
 }
 
-# Ensure 'hooks.<Event>' is an array of matchers
-function Ensure-EventList($obj, $eventName) {
-    $existing = $obj.PSObject.Properties[$eventName]
-    if ($null -eq $existing -or $null -eq $obj.$eventName) {
-        $obj | Add-Member -NotePropertyName $eventName -NotePropertyValue @() -Force
+function New-HookHandler($scriptName, [switch]$Async) {
+    $handler = [PSCustomObject]@{
+        type      = "command"
+        command   = "pythonw"
+        args      = @((Join-Path $HooksDir $scriptName))
+        onFailure = "continue"
     }
+    if ($Async) {
+        $handler | Add-Member -NotePropertyName 'async' -NotePropertyValue $true
+    }
+    return $handler
 }
 
-# Build the target config
-# Cross-platform: pythonw (Windows, no console) || python3 (macOS/Linux)
-$cmdPerm = "pythonw ~/.claude/hooks/scripts/permission_request.py || python3 ~/.claude/hooks/scripts/permission_request.py"
-$cmdExit = "pythonw ~/.claude/hooks/scripts/exit_plan_mode_notify.py || python3 ~/.claude/hooks/scripts/exit_plan_mode_notify.py"
-$cmdAsk  = "pythonw ~/.claude/hooks/scripts/ask_user_question.py || python3 ~/.claude/hooks/scripts/ask_user_question.py"
-$cmdStop = "pythonw ~/.claude/hooks/scripts/stop_notify.py || python3 ~/.claude/hooks/scripts/stop_notify.py"
-
-$permissionMain = [PSCustomObject]@{
-    matcher = "Bash|Edit|Write|Read|Glob|Grep|WebFetch|WebSearch|mcp__.*"
-    hooks   = @(@{ type = "command"; command = $cmdPerm })
-}
-$permissionExit = [PSCustomObject]@{
-    matcher = "ExitPlanMode"
-    hooks   = @(@{ type = "command"; command = $cmdExit })
-}
-$preAsk = [PSCustomObject]@{
-    matcher = "AskUserQuestion"
-    hooks   = @(@{ type = "command"; command = $cmdAsk })
-}
-$stopHook = [PSCustomObject]@{
-    matcher = $null
-    hooks   = @(@{ type = "command"; command = $cmdStop })
-}
-
-# PermissionRequest: replace or add both matchers
-Ensure-EventList $settings.hooks "PermissionRequest"
-$prList = @($settings.hooks.PermissionRequest)
-# Drop existing ExitPlanMode entry (we own that now)
-$prList = @($prList | Where-Object { $_.matcher -ne "ExitPlanMode" })
-# Drop existing main matcher (we own that now)
-$prList = @($prList | Where-Object { $_.matcher -ne "Bash|Edit|Write|Read|Glob|Grep|WebFetch|WebSearch|mcp__.*" })
-# Append ours
-$prList += $permissionMain
-$prList += $permissionExit
-$settings.hooks.PermissionRequest = $prList
-
-# PreToolUse: add AskUserQuestion if not present
-Ensure-EventList $settings.hooks "PreToolUse"
-$ptList = @($settings.hooks.PreToolUse)
-if (-not ($ptList | Where-Object { $_.matcher -eq "AskUserQuestion" })) {
-    $ptList += $preAsk
-}
-$settings.hooks.PreToolUse = $ptList
-
-# Stop: add ours if not present
-Ensure-EventList $settings.hooks "Stop"
-$stList = @($settings.hooks.Stop)
-$hasStopHook = $false
-foreach ($entry in $stList) {
-    if ($entry.hooks) {
-        foreach ($h in $entry.hooks) {
-            if ($h.command -like "*stop_notify.py*") { $hasStopHook = $true; break }
+function Test-OwnedEntry($entry) {
+    if ($null -eq $entry) { return $false }
+    $candidates = @($entry.hooks)
+    foreach ($h in $candidates) {
+        if ($null -eq $h) { continue }
+        $text = "$($h.command) $(@($h.args) -join ' ')"
+        foreach ($s in $Scripts) {
+            if ($text -like "*$s*") { return $true }
         }
     }
+    return $false
 }
-if (-not $hasStopHook) {
-    $stList += $stopHook
+
+function Set-HookEvent($eventName, $entries) {
+    if (-not ($settings.hooks.PSObject.Properties.Name -contains $eventName) -or $null -eq $settings.hooks.$eventName) {
+        $settings.hooks | Add-Member -NotePropertyName $eventName -NotePropertyValue @() -Force
+    }
+    # Drop only entries this installer owns; keep every unrelated hook.
+    $kept = @(@($settings.hooks.$eventName) | Where-Object {
+        $null -ne $_ -and -not (Test-OwnedEntry $_)
+    })
+    $settings.hooks.$eventName = @($kept) + @($entries)
 }
-$settings.hooks.Stop = $stList
+
+$permissionMain = [PSCustomObject]@{
+    matcher = "^(Bash|PowerShell|Edit|Write|Read|Glob|Grep|Agent|Workflow|WebFetch|WebSearch|NotebookEdit|mcp__.*)$"
+    hooks   = @(New-HookHandler "permission_request.py")
+}
+$permissionExit = [PSCustomObject]@{
+    matcher = "^ExitPlanMode$"
+    hooks   = @(New-HookHandler "exit_plan_mode_notify.py" -Async)
+}
+$preAsk = [PSCustomObject]@{
+    matcher = "^AskUserQuestion$"
+    hooks   = @(New-HookHandler "ask_user_question.py")
+}
+$stopHook = [PSCustomObject]@{
+    hooks   = @(New-HookHandler "stop_notify.py" -Async)
+}
+$stopFailureHook = [PSCustomObject]@{
+    hooks   = @(New-HookHandler "stop_notify.py" -Async)
+}
+$notificationHook = [PSCustomObject]@{
+    matcher = "agent_needs_input|agent_completed"
+    hooks   = @(New-HookHandler "notification_notify.py" -Async)
+}
+
+Set-HookEvent "PermissionRequest" @($permissionMain, $permissionExit)
+Set-HookEvent "PreToolUse" @($preAsk)
+Set-HookEvent "Stop" @($stopHook)
+Set-HookEvent "StopFailure" @($stopFailureHook)
+Set-HookEvent "Notification" @($notificationHook)
 
 # Write back
-$json = $settings | ConvertTo-Json -Depth 10
+$json = $settings | ConvertTo-Json -Depth 12
 [System.IO.File]::WriteAllText($SettingsPath, $json, [System.Text.UTF8Encoding]::new($false))
 Write-Ok "Wrote: $SettingsPath"
 
@@ -166,8 +168,16 @@ foreach ($s in $Scripts) {
     }
 }
 try {
-    Get-Content $SettingsPath -Raw | ConvertFrom-Json | Out-Null
+    $check = Get-Content $SettingsPath -Raw | ConvertFrom-Json
     Write-Ok "settings.json is valid JSON"
+    foreach ($eventName in @("PermissionRequest", "PreToolUse", "Stop", "StopFailure", "Notification")) {
+        if ($check.hooks.PSObject.Properties.Name -contains $eventName) {
+            Write-Ok "hooks.$eventName present"
+        } else {
+            Write-Err "hooks.$eventName missing"
+            $allOk = $false
+        }
+    }
 }
 catch {
     Write-Err "settings.json invalid: $_"
@@ -176,6 +186,7 @@ catch {
 
 if ($allOk) {
     Write-Host "`nDone! Restart Claude Code for hooks to take effect." -ForegroundColor Green
+    Write-Host "Note: exec form uses pythonw; if Python is installed without pythonw.exe, install it or use the plugin install instead." -ForegroundColor Yellow
 }
 else {
     Write-Host "`nInstall completed with errors. See above." -ForegroundColor Red

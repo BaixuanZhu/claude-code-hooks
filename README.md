@@ -1,6 +1,8 @@
-# Claude Code GUI Hooks
+# Claude Code Notify
 
-Replace Claude Code's terminal permission prompts with native GUI dialogs — zero dependencies, just Python + tkinter. Cross-platform: Windows, macOS, Linux.
+Native GUI dialogs and notifications for Claude Code — permission prompts, questions, turn completion, API failures, and subagent events. Zero dependencies beyond Python 3.10+ and tkinter.
+
+Cross-platform (Windows / macOS / Linux). Requires Claude Code **2.1.300+**.
 
 ## Demo
 
@@ -15,22 +17,26 @@ Replace Claude Code's terminal permission prompts with native GUI dialogs — ze
 
 | Hook | Event | What it does |
 |------|-------|--------------|
-| **Permission Request** | `PermissionRequest` | Allow/Deny dialog with suggestion buttons (session/project/global scope, Chinese labels) |
-| **Ask User Question** | `PreToolUse` → `AskUserQuestion` | Native option dialog — single select or multi select, with multi-line free-text "Other" input |
-| **Stop Notify** | `Stop` | Auto-closing messagebox when Claude finishes (8s) |
-| **Exit Plan Mode** | `PermissionRequest` → `ExitPlanMode` | Topmost messagebox when plan is ready (auto-closes 25s) |
+| **Permission Request** | `PermissionRequest` | Allow/Deny dialog with scope-aware suggestion buttons (session / project / global, Chinese labels) |
+| **Ask User Question** | `PreToolUse` → `AskUserQuestion` | Native option dialog — single/multi select plus multi-line free-text "Other" input |
+| **Stop Notify** | `Stop` | Auto-closing messagebox when Claude finishes (8s); says so when background work keeps running |
+| **Plan Ready** | `PermissionRequest` → `ExitPlanMode` | Topmost messagebox when a plan is ready (auto-closes after 25s) |
+| **API Failure** | `StopFailure` | Messagebox when a turn ends due to rate limit, auth, or other API errors |
+| **Agent Events** | `Notification` | Messagebox when a subagent needs input or finishes |
 
 - **Zero dependencies** — Python 3.10+ + tkinter, nothing else
-- **Cross-platform** — Windows, macOS, Linux
+- **Async notifications** — Stop, StopFailure, plan, and agent dialogs run in the background; they never delay Claude
+- **Headless-safe** — dialogs are skipped in CI or with `CLAUDE_GUI_HOOKS_DISABLE=1`, leaving Claude Code's normal permission flow untouched
+- **Never blocks on failure** — broken hooks fall through (`onFailure: "continue"`) instead of blocking a tool call
 - **Modern ttk styling** — themed widgets (vista/winnative/clam) for a clean native look
 - **Keyboard shortcuts** — Enter to Allow, Escape to Deny, number keys for suggestions, Ctrl+Enter to confirm in text areas
-- **No console flash** — uses `pythonw` on Windows (falls back to `python3` on macOS/Linux)
+- **No console flash** — uses `pythonw` on Windows
 
 ## Install
 
 ### Plugin install (recommended)
 
-Requires Claude Code v2.1+ with plugin support.
+Requires Claude Code v2.1.300+ with plugin support.
 
 **Step 1** — Add the marketplace:
 
@@ -41,21 +47,28 @@ claude plugin marketplace add BaixuanZhu/claude-code-hooks
 **Step 2** — Install the plugin:
 
 ```bash
-claude plugin install claude-code-hooks@claude-code-hooks
+claude plugin install desktop-dialogs@claude-code-hooks
 ```
 
 Or use the interactive `/plugin` command to browse and enable. No `settings.json` modification needed — hooks are bundled in the plugin.
 
-**Update** — Push new commits to the repo; Claude Code auto-updates on next session:
+**Update:**
 
 ```bash
-claude plugin update claude-code-hooks
+claude plugin update desktop-dialogs
 ```
 
-**Uninstall** — Clean removal, no leftover config:
+**Uninstall:**
+
+```bash
+claude plugin uninstall desktop-dialogs
+```
+
+**Upgrading from 0.2.x** — the plugin was renamed, so reinstall once:
 
 ```bash
 claude plugin uninstall claude-code-hooks
+claude plugin install desktop-dialogs@claude-code-hooks
 ```
 
 To test locally before publishing:
@@ -63,8 +76,10 @@ To test locally before publishing:
 ```bash
 git clone https://github.com/BaixuanZhu/claude-code-hooks.git
 claude plugin marketplace add ./claude-code-hooks
-claude plugin install claude-code-hooks@claude-code-hooks
+claude plugin install desktop-dialogs@claude-code-hooks
 ```
+
+> On Windows the plugin uses a shell-form command, which needs Git for Windows (Git Bash). Without Git Bash the hooks degrade to "no dialog, no blocking" — use the PowerShell installer below to get exec-form commands that need no shell.
 
 ### PowerShell one-liner (Windows)
 
@@ -72,7 +87,7 @@ claude plugin install claude-code-hooks@claude-code-hooks
 iwr https://raw.githubusercontent.com/BaixuanZhu/claude-code-hooks/main/install.ps1 -UseBasicParsing | iex
 ```
 
-Downloads all 4 hooks and merges into `~/.claude/settings.json`. Idempotent — safe to re-run.
+Downloads all 5 hooks and merges exec-form entries into `~/.claude/settings.json`. Idempotent — safe to re-run, and only replaces entries owned by this installer.
 
 ### AI-assisted install
 
@@ -87,31 +102,87 @@ The AI reads `SKILL.md` and installs everything automatically.
 ### Manual
 
 1. Clone the repo
-2. Copy `hooks/*.py` into `~/.claude/hooks/scripts/` (create the folder if needed)
+2. Copy `hooks/*.py` (5 files) into `~/.claude/hooks/scripts/` (create the folder if needed)
 3. Add to `~/.claude/settings.json`:
+
+Set `<PYTHON>` to `pythonw` on Windows or `python3` on macOS/Linux, and `<SCRIPTS_DIR>` to the **absolute** scripts path (for example `C:/Users/you/.claude/hooks/scripts`). Exec form (`command` + `args`) needs no shell, so it works even when Windows PowerShell 5.1 is the default shell.
 
 ```json
 {
   "hooks": {
     "PermissionRequest": [
       {
-        "matcher": "Bash|Edit|Write|Read|Glob|Grep|WebFetch|WebSearch|mcp__.*",
-        "hooks": [{ "type": "command", "command": "pythonw ~/.claude/hooks/scripts/permission_request.py || python3 ~/.claude/hooks/scripts/permission_request.py" }]
+        "matcher": "^(Bash|PowerShell|Edit|Write|Read|Glob|Grep|Agent|Workflow|WebFetch|WebSearch|NotebookEdit|mcp__.*)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "<PYTHON>",
+            "args": ["<SCRIPTS_DIR>/permission_request.py"],
+            "onFailure": "continue"
+          }
+        ]
       },
       {
-        "matcher": "ExitPlanMode",
-        "hooks": [{ "type": "command", "command": "pythonw ~/.claude/hooks/scripts/exit_plan_mode_notify.py || python3 ~/.claude/hooks/scripts/exit_plan_mode_notify.py" }]
+        "matcher": "^ExitPlanMode$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "<PYTHON>",
+            "args": ["<SCRIPTS_DIR>/exit_plan_mode_notify.py"],
+            "async": true,
+            "onFailure": "continue"
+          }
+        ]
       }
     ],
     "PreToolUse": [
       {
-        "matcher": "AskUserQuestion",
-        "hooks": [{ "type": "command", "command": "pythonw ~/.claude/hooks/scripts/ask_user_question.py || python3 ~/.claude/hooks/scripts/ask_user_question.py" }]
+        "matcher": "^AskUserQuestion$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "<PYTHON>",
+            "args": ["<SCRIPTS_DIR>/ask_user_question.py"],
+            "onFailure": "continue"
+          }
+        ]
       }
     ],
     "Stop": [
       {
-        "hooks": [{ "type": "command", "command": "pythonw ~/.claude/hooks/scripts/stop_notify.py || python3 ~/.claude/hooks/scripts/stop_notify.py" }]
+        "hooks": [
+          {
+            "type": "command",
+            "command": "<PYTHON>",
+            "args": ["<SCRIPTS_DIR>/stop_notify.py"],
+            "async": true
+          }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "<PYTHON>",
+            "args": ["<SCRIPTS_DIR>/stop_notify.py"],
+            "async": true
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "agent_needs_input|agent_completed",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "<PYTHON>",
+            "args": ["<SCRIPTS_DIR>/notification_notify.py"],
+            "async": true
+          }
+        ]
       }
     ]
   }
@@ -120,15 +191,22 @@ The AI reads `SKILL.md` and installs everything automatically.
 
 4. Restart Claude Code
 
-> On Windows, `pythonw` runs without a console window. On macOS/Linux, `pythonw` is absent so `python3` is used via the `||` fallback. `~` is expanded automatically by Claude Code.
-
 ## Platform requirements
 
-| Platform | Python | tkinter | Notes |
-|----------|--------|---------|-------|
+| Platform | Python | tkinter | Interpreters |
+|----------|--------|---------|--------------|
 | Windows | 3.10+ | Built-in | `pythonw` for no console flash |
-| macOS | 3.10+ | `brew install python-tk` | Falls back to `python3` |
-| Linux | 3.10+ | `sudo apt install python3-tk` | Falls back to `python3` |
+| macOS | 3.10+ | `brew install python-tk` | `python3` |
+| Linux | 3.10+ | `sudo apt install python3-tk` | `python3` |
+
+## Behavior notes
+
+- **Permission suggestions** — deny suggestions are marked "仅本次" because Claude Code's `updatedPermissions` is allow-only; a deny rule cannot be persisted from a dialog. Use `/permissions` for permanent deny rules.
+- **Headless runs** — `CI` or `CLAUDE_GUI_HOOKS_DISABLE=1` makes every hook exit silently, so `-p` runs and CI pipelines never pop a dialog.
+- **Windows without Git Bash (plugin install)** — hooks fail to start and `onFailure: "continue"` lets the tool call proceed without a dialog. The PowerShell installer avoids this.
+- **Async hooks** — Stop/StopFailure/Notification/plan dialogs are fire-and-forget. In `-p` runs, Claude Code terminates background hooks at teardown, so the dialog may not appear.
+- **Notification types** — only `agent_needs_input` and `agent_completed` are shown. `idle_prompt` and `permission_prompt` are intentionally ignored because the Stop and PermissionRequest dialogs already cover them.
+- **Multi-select answers** — returned as label arrays, which also avoids ambiguity when a label contains a comma.
 
 ## Limitations
 
