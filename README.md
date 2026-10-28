@@ -8,12 +8,17 @@ Cross-platform (Windows / macOS / Linux). Requires Claude Code **2.1.300+**.
 
 ## Demo
 
+Dialogs follow the system language (Chinese or English); set `CLAUDE_GUI_HOOKS_LANG=en|zh` to override. Captured on Windows 11 with a Chinese UI.
+
 | Hook | Screenshot |
 |------|------------|
-| Permission Request | ![Permission Request](docs/screenshots/permission-request.png) |
+| Permission Request — Chinese | ![Permission Request](docs/screenshots/permission-request.png) |
+| Permission Request — English | ![Permission Request (English)](docs/screenshots/permission-request-en.png) |
 | Ask User Question | ![Ask User Question](docs/screenshots/ask-user-question.png) |
 | Stop Notify | ![Stop Notify](docs/screenshots/stop-notify.png) |
+| API Failure | ![API Failure](docs/screenshots/stop-failure.png) |
 | Exit Plan Mode | ![Exit Plan Mode](docs/screenshots/exit-plan-mode.png) |
+| Agent Events | ![Agent Events](docs/screenshots/agent-notify.png) |
 
 ## Features
 
